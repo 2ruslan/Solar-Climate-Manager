@@ -4,12 +4,9 @@
 NUMERIC_SETTINGS = {
     "estimated_ac_power": (100, 10000, 50, "W"),
     "minimum_soc": (0, 100, 1, "%"),
-    "max_grid_import": (0, 20000, 50, "W"),
     "grid_absence_minutes": (0, 120, 1, "min"),
 }
 BOOLEAN_SETTINGS = [
-    "prioritize_charging",
-    "allow_grid_import",
     "load_includes_ac",
     "load_includes_battery_charging",
     "grid_on_means_available",
@@ -20,7 +17,6 @@ FIXED_POLICY_KEYS = {
     "max_data_age",
     "power_max_data_age",
     "grid_max_data_age",
-    "verification_delay",
     "max_battery_discharge",
     "start_delay",
     "shortage_delay",
@@ -52,8 +48,6 @@ COMFORT_KEYS = {
 ENERGY_KEYS = {
     "estimated_ac_power",
     "minimum_soc",
-    "prioritize_charging",
-    "allow_grid_import",
 }
 SOURCE_FLAGS = {
     "load_includes_ac",

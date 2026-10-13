@@ -47,6 +47,10 @@ REMOVED_SETTINGS = (
         "power_reserve",
         "energy_hysteresis",
         "adverse_power_delay",
+        "allow_grid_import",
+        "max_grid_import",
+        "prioritize_charging",
+        "verification_delay",
     }
     | RETIRED_RULES
 )

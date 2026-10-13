@@ -1,7 +1,7 @@
 {
   "domain": "solar_climate_manager",
   "name": "Solar Climate Manager",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "config_flow": true,
   "integration_type": "helper",
   "iot_class": "calculated",

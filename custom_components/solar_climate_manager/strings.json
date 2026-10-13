@@ -72,9 +72,7 @@
         "title": "Energy",
         "data": {
           "estimated_ac_power": "Conservative estimated AC power (W)",
-          "minimum_soc": "Minimum SOC: immediate demo stop below (%)",
-          "prioritize_charging": "Preserve current battery charging",
-          "allow_grid_import": "Allow limited grid import in demo"
+          "minimum_soc": "Minimum SOC: immediate demo stop below (%)"
         },
         "description": "Demo only. Other sections and the observation switch state are preserved."
       },
@@ -84,13 +82,6 @@
           "grid_absence_minutes": "Grid absence duration (minutes)"
         },
         "description": "Other technical settings are fixed: balance is assessed over 10 minutes; short load spikes are tolerated."
-      },
-      "energy_limits": {
-        "title": "Grid import limit",
-        "data": {
-          "max_grid_import": "Maximum grid import (W)"
-        },
-        "description": "Demo only. Other sections and the observation switch state are preserved."
       }
     },
     "error": {
@@ -200,18 +191,15 @@
           "invalid_energy_data": "Required data missing, stale or invalid",
           "low_soc": "SOC below minimum",
           "battery_discharge": "Battery discharge exceeds limit",
-          "grid_import": "Grid import exceeds limit",
           "outage_deficit": "Both outage and solar deficit timers expired",
           "no_temperature_demand": "No temperature demand",
           "minimum_run": "Waiting for minimum run time",
           "insufficient_surplus": "Insufficient actual solar surplus",
-          "forecast_insufficient": "Forecast insufficient",
-          "start_confirmation": "Collecting 10-minute observation window",
+          "start_confirmation": "Assessing solar balance during outage",
           "minimum_off": "Waiting for minimum off time",
           "solar_ready": "Solar conditions confirmed",
-          "grid_ready": "Limited grid import permitted",
-          "running": "Virtual run; monitoring conditions",
-          "energy_deficit": "Sustained energy deficit"
+          "grid_ready": "Grid available: temperature control allowed",
+          "running": "Virtual run; monitoring conditions"
         }
       },
       "manual_status": {
@@ -246,7 +234,7 @@
         "name": "Grid available"
       },
       "energy_allowed": {
-        "name": "Demo energy conditions allow start"
+        "name": "Energy conditions allow demo operation"
       },
       "virtual_running": {
         "name": "Virtual AC running"

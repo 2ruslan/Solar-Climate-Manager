@@ -116,10 +116,10 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_demo_starts_without_a_services_api(self):
-        self.assertEqual(self.coordinator.data["demo_action"], "wait")
+        self.assertEqual(self.coordinator.data["demo_action"], "would_start")
         clock.current += timedelta(seconds=600)
         self.coordinator._evaluate()
-        self.assertEqual(self.coordinator.data["demo_action"], "would_start")
+        self.assertEqual(self.coordinator.data["demo_action"], "would_continue")
         self.assertTrue(self.coordinator.data["virtual_running"])
         self.assertFalse(self.coordinator.data["control_allowed"])
         self.assertEqual(self.states["climate.ac"].state, "off")
@@ -147,7 +147,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             state.last_reported = clock.current
         new._evaluate()
         self.assertFalse(new.data["manual_pause"])
-        self.assertEqual(new.data["demo_action"], "wait")
+        self.assertEqual(new.data["demo_action"], "would_start")
 
     async def test_signed_sources_and_stale_soc(self):
         self.coordinator.settings["battery_positive"] = "charge"
@@ -170,7 +170,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.states["sensor.pv"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
         self.assertIsNone(self.coordinator.data["pv_power"])
-        self.assertEqual(self.coordinator.data["strategy_reason"], "invalid_energy_data")
+        self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
 
     async def test_removed_settings_ignored_on_existing_entry(self):
         self.entry.options = {
@@ -190,13 +190,13 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("sensor.forecast", "unavailable", unit_of_measurement="W")
         self.coordinator._evaluate()
         self.assertIsNone(self.coordinator.data["forecast_power_now"])
-        self.assertEqual(self.coordinator.data["strategy_reason"], "invalid_energy_data")
+        self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
 
     async def test_configured_ac_meter_missing_is_not_silently_estimated(self):
         self.coordinator.settings["ac_power_entity"] = "sensor.ac_missing"
         self.coordinator._evaluate()
-        self.assertTrue(self.coordinator.data["energy_data_invalid"])
-        self.assertEqual(self.coordinator.data["strategy_reason"], "invalid_energy_data")
+        self.assertFalse(self.coordinator.data["energy_data_invalid"])
+        self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
 
     async def test_inclusive_load_and_signed_charge_mapping(self):
         self.coordinator.settings["load_includes_battery_charging"] = True
@@ -206,7 +206,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["load_power"], 1600)
         self.assertEqual(self.coordinator.data["house_load_power"], 600)
         self.assertEqual(self.coordinator.data["battery_charge_power"], 1000)
-        self.assertEqual(self.coordinator.data["solar_margin"], 300)
+        self.assertEqual(self.coordinator.data["solar_margin"], 1300)
         self.put("sensor.battery", "unavailable")
         self.coordinator._evaluate()
         self.assertIsNone(self.coordinator.data["house_load_power"])

@@ -69,7 +69,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("allow_forecast_trial", energy["data_schema"].schema)
 
     async def test_edit_preserves_disabled_and_other_sections(self):
-        self.entry.options = {"enabled": False, "max_grid_import": 700}
+        self.entry.options = {"enabled": False, "minimum_soc": 90}
         result = await self.flow.async_step_comfort(
             {
                 "target_temperature": 24,
@@ -80,16 +80,12 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["type"], "create_entry")
         self.assertFalse(result["data"]["enabled"])
-        self.assertEqual(result["data"]["max_grid_import"], 700)
+        self.assertEqual(result["data"]["minimum_soc"], 90)
         self.assertEqual(result["data"]["pv_power_entity"], "sensor.pv")
 
     async def test_conditional_limits_only_when_enabled(self):
-        self.flow.pending = {"allow_grid_import": False, "prioritize_charging": False}
-        self.assertFalse(self.flow.limit_keys())
-        self.flow.pending["allow_grid_import"] = True
-        self.assertEqual(self.flow.limit_keys(), {"max_grid_import"})
-        self.flow.pending["prioritize_charging"] = True
-        self.assertEqual(self.flow.limit_keys(), {"max_grid_import"})
+        form = await self.flow.async_step_energy()
+        self.assertEqual(set(form["data_schema"].schema), {"estimated_ac_power", "minimum_soc"})
 
     async def test_source_clear_keeps_schedule_and_comfort(self):
         self.entry.options["schedule_entity"] = "schedule.day"

@@ -235,7 +235,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             forecasts=forecasts,
             actual_ac_power=actual_ac,
             other_virtual_power=reserved,
-            temperature_valid=decision.data_valid and ac_valid,
+            temperature_valid=decision.data_valid and (grid is True or ac_valid),
             schedule_allowed=schedule is True,
         )
         strategy = decide(
@@ -272,16 +272,15 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 "energy_data_invalid": any(
                     value is None
                     for value in (
-                        data["pv_power"],
-                        data["load_power"],
                         data["soc"],
                         data["battery_power"],
-                        data["grid_power"],
                         grid,
                     )
                 )
-                or not ac_valid
-                or any(value is None for value in snapshot.forecasts),
+                or (
+                    grid is False
+                    and (data["pv_power"] is None or data["load_power"] is None or not ac_valid)
+                ),
             }
         )
         if stored_before != self._stored_state():

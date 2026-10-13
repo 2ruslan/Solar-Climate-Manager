@@ -141,9 +141,6 @@ class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
-    def __init__(self):
-        self.pending = None
-
     def values(self):
         return configuration_values(
             self.config_entry.data, self.config_entry.options, DEFAULTS, REMOVED_SETTINGS
@@ -190,25 +187,4 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
         return await self.section("advanced", ADVANCED_KEYS, user_input)
 
     async def async_step_energy(self, user_input=None):
-        values = self.values()
-        if user_input is not None:
-            merged = merge_section(values, user_input, removed=REMOVED_SETTINGS)
-            error = validate(self.hass, merged)
-            if error:
-                return self.form("energy", ENERGY_KEYS, merged, {"base": error})
-            self.pending = merged
-            if self.limit_keys():
-                return await self.async_step_energy_limits()
-            return self.async_create_entry(title="", data=merged)
-        return self.form("energy", ENERGY_KEYS, values)
-
-    def limit_keys(self):
-        keys = set()
-        if self.pending["allow_grid_import"]:
-            keys.add("max_grid_import")
-        return keys
-
-    async def async_step_energy_limits(self, user_input=None):
-        if user_input is not None:
-            return self.async_create_entry(title="", data=merge_section(self.pending, user_input))
-        return self.form("energy_limits", self.limit_keys(), self.pending)
+        return await self.section("energy", ENERGY_KEYS, user_input)
