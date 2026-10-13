@@ -27,3 +27,27 @@ def read_power(value, unit, *, now: datetime, reported: datetime, max_age: float
         return None
     result = power_watts(value, unit)
     return round(result, 1) if result is not None else None
+
+
+def signed_power_watts(value, unit):
+    if isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if unit == "kW":
+        result *= 1000
+    elif unit != "W":
+        return None
+    return round(result, 1) if isfinite(result) else None
+
+
+def soc_percent(value, unit):
+    if unit != "%" or isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if isfinite(result) and 0 <= result <= 100 else None

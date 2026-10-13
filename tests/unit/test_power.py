@@ -14,6 +14,12 @@ power = importlib.import_module("scm_power_test.power")
 
 
 class PowerTests(unittest.TestCase):
+    def test_signed_power_and_soc(self):
+        self.assertEqual(power.signed_power_watts("-1.5", "kW"), -1500)
+        self.assertEqual(power.soc_percent("90", "%"), 90)
+        for value, unit in [(101, "%"), (-1, "%"), ("nan", "%"), (90, None)]:
+            self.assertIsNone(power.soc_percent(value, unit))
+
     def test_watts_and_kilowatts(self):
         self.assertEqual(power.power_watts("2800", "W"), 2800)
         self.assertEqual(power.power_watts("2.8", "kW"), 2800)

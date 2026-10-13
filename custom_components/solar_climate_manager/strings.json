@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Solar Climate Manager",
-        "description": "Observation only. Solar sources are optional; select power forecasts for the indicated times. No device commands are sent.",
+        "description": "Demo only: no climate or inverter commands. Select energy sources and check power signs. Missing essential sources block virtual starts. Optional sources may be cleared.",
         "data": {
           "climate_entity": "Air conditioner",
           "temperature_entity": "Room temperature sensor",
@@ -17,7 +17,48 @@
           "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
           "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
           "power_max_data_age": "Maximum PV reading age (seconds)",
-          "forecast_max_data_age": "Maximum forecast sensor report age (seconds)"
+          "forecast_max_data_age": "Maximum forecast sensor report age (seconds)",
+          "load_power_entity": "House load power sensor (excluding battery charging)",
+          "soc_entity": "Battery SOC sensor (%)",
+          "battery_power_entity": "Signed battery power sensor",
+          "grid_power_entity": "Signed grid import/export power sensor",
+          "grid_available_entity": "Grid availability binary sensor",
+          "ac_power_entity": "AC power sensor (optional)",
+          "schedule_entity": "Allowed schedule helper (optional)",
+          "estimated_ac_power": "Conservative estimated AC power (W)",
+          "power_reserve": "Power reserve (W)",
+          "energy_hysteresis": "Energy decision hysteresis (W)",
+          "minimum_soc": "Minimum SOC for demo operation (%)",
+          "critical_soc": "Critical SOC: immediate virtual stop (%)",
+          "battery_reserve_soc": "Desired battery reserve SOC (%)",
+          "prioritize_charging": "Prioritize charging below reserve SOC",
+          "charging_reserve_power": "Minimum charging power budget (W)",
+          "max_battery_discharge": "Maximum tolerated battery discharge (W)",
+          "allow_grid_import": "Allow limited grid import in demo",
+          "max_grid_import": "Maximum grid import (W)",
+          "require_forecast": "Require a valid sufficient forecast",
+          "allow_forecast_trial": "Allow forecast trial for curtailed PV (demo only)",
+          "start_delay": "Continuous surplus confirmation time (seconds)",
+          "shortage_delay": "Continuous energy deficit time (seconds)",
+          "grid_absence_delay": "Continuous grid absence time (seconds)",
+          "minimum_run_time": "Minimum virtual run time (seconds)",
+          "minimum_off_time": "Minimum virtual off time (seconds)",
+          "verification_delay": "Post-start stabilization time (seconds)",
+          "adverse_power_delay": "Import/discharge violation confirmation (seconds)",
+          "grid_max_data_age": "Maximum grid availability report age (seconds)",
+          "load_includes_ac": "House load includes the real AC",
+          "grid_on_means_available": "Grid binary sensor ON means available",
+          "battery_positive": "Positive battery power means",
+          "grid_positive": "Positive grid power means",
+          "pause_on_external_change": "Pause demo until midnight on external climate changes",
+          "forecast_detail_entity": "Detailed forecast source (optional)",
+          "forecast_updated_entity": "Forecast generation timestamp sensor (optional)",
+          "forecast_detail_attribute": "Detailed forecast list attribute",
+          "forecast_value_attribute": "Forecast power field in each period",
+          "forecast_detail_unit": "Detailed forecast power units",
+          "forecast_horizon": "Forecast horizon (minutes)",
+          "forecast_period_minutes": "Forecast period duration (minutes)",
+          "forecast_generation_max_age": "Maximum detailed forecast / generation age (seconds)"
         }
       }
     },
@@ -25,7 +66,9 @@
       "invalid_climate": "Select an existing climate entity.",
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
-      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh)."
+      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
+      "invalid_soc_thresholds": "Require critical SOC < minimum SOC ≤ reserve SOC.",
+      "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %)."
     },
     "abort": {
       "already_configured": "This climate entity is already configured."
@@ -47,16 +90,59 @@
           "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
           "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
           "power_max_data_age": "Maximum PV reading age (seconds)",
-          "forecast_max_data_age": "Maximum forecast sensor report age (seconds)"
+          "forecast_max_data_age": "Maximum forecast sensor report age (seconds)",
+          "load_power_entity": "House load power sensor (excluding battery charging)",
+          "soc_entity": "Battery SOC sensor (%)",
+          "battery_power_entity": "Signed battery power sensor",
+          "grid_power_entity": "Signed grid import/export power sensor",
+          "grid_available_entity": "Grid availability binary sensor",
+          "ac_power_entity": "AC power sensor (optional)",
+          "schedule_entity": "Allowed schedule helper (optional)",
+          "estimated_ac_power": "Conservative estimated AC power (W)",
+          "power_reserve": "Power reserve (W)",
+          "energy_hysteresis": "Energy decision hysteresis (W)",
+          "minimum_soc": "Minimum SOC for demo operation (%)",
+          "critical_soc": "Critical SOC: immediate virtual stop (%)",
+          "battery_reserve_soc": "Desired battery reserve SOC (%)",
+          "prioritize_charging": "Prioritize charging below reserve SOC",
+          "charging_reserve_power": "Minimum charging power budget (W)",
+          "max_battery_discharge": "Maximum tolerated battery discharge (W)",
+          "allow_grid_import": "Allow limited grid import in demo",
+          "max_grid_import": "Maximum grid import (W)",
+          "require_forecast": "Require a valid sufficient forecast",
+          "allow_forecast_trial": "Allow forecast trial for curtailed PV (demo only)",
+          "start_delay": "Continuous surplus confirmation time (seconds)",
+          "shortage_delay": "Continuous energy deficit time (seconds)",
+          "grid_absence_delay": "Continuous grid absence time (seconds)",
+          "minimum_run_time": "Minimum virtual run time (seconds)",
+          "minimum_off_time": "Minimum virtual off time (seconds)",
+          "verification_delay": "Post-start stabilization time (seconds)",
+          "adverse_power_delay": "Import/discharge violation confirmation (seconds)",
+          "grid_max_data_age": "Maximum grid availability report age (seconds)",
+          "load_includes_ac": "House load includes the real AC",
+          "grid_on_means_available": "Grid binary sensor ON means available",
+          "battery_positive": "Positive battery power means",
+          "grid_positive": "Positive grid power means",
+          "pause_on_external_change": "Pause demo until midnight on external climate changes",
+          "forecast_detail_entity": "Detailed forecast source (optional)",
+          "forecast_updated_entity": "Forecast generation timestamp sensor (optional)",
+          "forecast_detail_attribute": "Detailed forecast list attribute",
+          "forecast_value_attribute": "Forecast power field in each period",
+          "forecast_detail_unit": "Detailed forecast power units",
+          "forecast_horizon": "Forecast horizon (minutes)",
+          "forecast_period_minutes": "Forecast period duration (minutes)",
+          "forecast_generation_max_age": "Maximum detailed forecast / generation age (seconds)"
         },
-        "description": "Observation only. Solar sources are optional; select power forecasts for the indicated times. No device commands are sent."
+        "description": "Demo only: no climate or inverter commands. Select energy sources and check power signs. Missing essential sources block virtual starts. Optional sources may be cleared."
       }
     },
     "error": {
       "invalid_climate": "Select an existing climate entity.",
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
-      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh)."
+      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
+      "invalid_soc_thresholds": "Require critical SOC < minimum SOC ≤ reserve SOC.",
+      "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %)."
     }
   },
   "selector": {
@@ -64,6 +150,18 @@
       "options": {
         "heat": "Heating",
         "cool": "Cooling"
+      }
+    },
+    "battery_positive": {
+      "options": {
+        "charge": "Charging",
+        "discharge": "Discharging"
+      }
+    },
+    "grid_positive": {
+      "options": {
+        "import": "Import",
+        "export": "Export"
       }
     }
   },
@@ -99,6 +197,77 @@
       },
       "forecast_power_60m": {
         "name": "Forecast power in 1 hour"
+      },
+      "load_power": {
+        "name": "House load power"
+      },
+      "battery_power": {
+        "name": "Battery power discharge positive"
+      },
+      "grid_power": {
+        "name": "Grid power import positive"
+      },
+      "ac_power": {
+        "name": "Measured AC power"
+      },
+      "soc": {
+        "name": "Battery SOC"
+      },
+      "solar_margin": {
+        "name": "Solar budget after AC and reserves"
+      },
+      "forecast_margin": {
+        "name": "Forecast budget after AC and reserves"
+      },
+      "seconds_to_start": {
+        "name": "Time to possible demo start"
+      },
+      "seconds_to_stop": {
+        "name": "Time to possible demo stop"
+      },
+      "demo_action": {
+        "name": "Demo strategy action",
+        "state": {
+          "would_start": "Would start",
+          "would_continue": "Would continue running",
+          "would_stop": "Would stop",
+          "wait": "Would wait"
+        }
+      },
+      "strategy_reason": {
+        "name": "Demo strategy reason",
+        "state": {
+          "disabled": "Demo disabled",
+          "manual_pause": "External change: paused until midnight",
+          "outside_schedule": "Outside allowed schedule or schedule unavailable",
+          "critical_soc": "Critical SOC: immediate virtual stop",
+          "invalid_energy_data": "Required data missing, stale or invalid",
+          "low_soc": "SOC below minimum",
+          "reserve_protection": "Protect battery reserve from discharge",
+          "battery_discharge": "Battery discharge exceeds limit",
+          "grid_import": "Grid import exceeds limit",
+          "outage_deficit": "Both outage and solar deficit timers expired",
+          "verification_failed": "Forecast trial not confirmed by actual PV",
+          "no_temperature_demand": "No temperature demand",
+          "minimum_run": "Waiting for minimum run time",
+          "insufficient_surplus": "Insufficient actual solar surplus",
+          "forecast_insufficient": "Forecast insufficient",
+          "start_confirmation": "Confirming continuous surplus",
+          "minimum_off": "Waiting for minimum off time",
+          "solar_ready": "Solar conditions confirmed",
+          "grid_ready": "Limited grid import permitted",
+          "forecast_trial": "Virtual trial based on forecast",
+          "running": "Virtual run; monitoring conditions",
+          "energy_deficit": "Sustained energy deficit"
+        }
+      },
+      "manual_status": {
+        "name": "Manual priority status",
+        "state": {
+          "automatic": "Automatic demo strategy",
+          "manual_today": "Manual priority until midnight",
+          "disabled": "Disabled"
+        }
       }
     },
     "binary_sensor": {
@@ -110,6 +279,21 @@
       },
       "control_allowed": {
         "name": "Real control allowed"
+      },
+      "grid_available": {
+        "name": "Grid available"
+      },
+      "energy_allowed": {
+        "name": "Demo energy conditions allow start"
+      },
+      "virtual_running": {
+        "name": "Virtual AC running"
+      },
+      "manual_pause": {
+        "name": "Manual pause until midnight"
+      },
+      "energy_data_invalid": {
+        "name": "Unavailable or stale energy data"
       }
     },
     "switch": {

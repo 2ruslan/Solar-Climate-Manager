@@ -9,9 +9,12 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULTS, DOMAIN, POWER_SOURCES
+from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES
+from .forecast import aware_datetime, covered_forecast
+from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
-from .power import read_power
+from .power import read_power, signed_power_watts, soc_percent
+from .strategy import DemoState, EnergySnapshot, decide, serialize, valid_timestamp
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,17 +29,31 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.demand = False
         self.signature = None
+        self.demo = DemoState()
+        self.manual_date = None
+        self.policy_signature = dict(self.settings)
 
     async def async_initialize(self):
         saved = await self.store.async_load() or {}
         self.signature = self._signature()
         if saved.get("signature") == self.signature:
             self.demand = saved.get("demand") is True
+        self.manual_date = saved.get("manual_date")
+        if saved.get("policy_signature") == self.policy_signature:
+            self.demo.restore(saved.get("demo"), dt_util.utcnow().timestamp())
+        elif isinstance(saved.get("demo"), dict):
+            previous = saved["demo"]
+            now = dt_util.utcnow().timestamp()
+            self.demo.last_stop = (
+                now
+                if previous.get("running") is True
+                else valid_timestamp(previous.get("last_stop"), now)
+            )
         self.entry.async_on_unload(
             async_track_state_change_event(
                 self.hass,
                 [self.settings["temperature_entity"], self.settings["climate_entity"]]
-                + [self.settings[key] for key in POWER_SOURCES.values() if self.settings.get(key)],
+                + [self.settings[key] for key in OPTIONAL_SOURCES if self.settings.get(key)],
                 self._state_changed,
             )
         )
@@ -62,10 +79,27 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         await self.store.async_save(self._stored_state())
 
     def _stored_state(self):
-        return {"demand": self.demand, "signature": self.signature}
+        return {
+            "demand": self.demand,
+            "signature": self.signature,
+            "manual_date": self.manual_date,
+            "demo": serialize(self.demo),
+            "policy_signature": self.policy_signature,
+        }
 
     @callback
     def _state_changed(self, event):
+        if (
+            event.data.get("entity_id") == self.settings["climate_entity"]
+            and self.settings["pause_on_external_change"]
+        ):
+            old = event.data.get("old_state")
+            new = event.data.get("new_state")
+            before = control_fingerprint(old.state, old.attributes) if old else None
+            after = control_fingerprint(new.state, new.attributes) if new else None
+            if before is not None and after is not None and before != after:
+                self.manual_date = dt_util.now().date().isoformat()
+                self.store.async_delay_save(self._stored_state, 1)
         self._evaluate()
 
     @callback
@@ -75,6 +109,11 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
     @callback
     def _evaluate(self):
         settings = self.settings
+        stored_before = self._stored_state()
+        today = dt_util.now().date()
+        manual = pause_active(self.manual_date, today)
+        if self.manual_date and not manual:
+            self.manual_date = None
         state = self.hass.states.get(settings["temperature_entity"])
         climate = self.hass.states.get(settings["climate_entity"])
         temperature = (
@@ -102,7 +141,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         )
         if self.demand != decision.demand:
             self.demand = decision.demand
-            self.store.async_delay_save(self._stored_state, 1)
         data = {
             "temperature": temperature if fresh else None,
             "demand": decision.demand,
@@ -128,7 +166,167 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 if source
                 else None
             )
+        for key in ("load_power", "battery_power", "grid_power", "soc", "ac_power"):
+            data[key] = self._energy_value(f"{key}_entity", now, key)
+        if data["battery_power"] is not None and settings["battery_positive"] == "charge":
+            data["battery_power"] *= -1
+        if data["grid_power"] is not None and settings["grid_positive"] == "export":
+            data["grid_power"] *= -1
+        grid = self._binary_value("grid_available_entity", now, settings["grid_max_data_age"])
+        if grid is not None and not settings["grid_on_means_available"]:
+            grid = not grid
+        schedule = (
+            self._binary_value("schedule_entity", now, None)
+            if settings.get("schedule_entity")
+            else True
+        )
+        actual_ac = data["ac_power"]
+        if actual_ac is None:
+            actual_ac = (
+                settings["estimated_ac_power"]
+                if climate and climate.attributes.get("hvac_action") in ("heating", "cooling")
+                else 0
+            )
+        ac_valid = not settings.get("ac_power_entity") or data["ac_power"] is not None
+        forecast_keys = ("forecast_power_now", "forecast_power_30m") + (
+            ("forecast_power_60m",) if settings["forecast_horizon"] == 60 else ()
+        )
+        forecasts = tuple(data[key] for key in forecast_keys)
+        if settings.get("forecast_detail_entity"):
+            detail = self.hass.states.get(settings["forecast_detail_entity"])
+            detail_fresh = (
+                detail is not None
+                and detail.state not in ("unknown", "unavailable")
+                and is_fresh(now, detail.last_reported, settings["forecast_generation_max_age"])
+            )
+            forecasts = (
+                covered_forecast(
+                    detail.attributes.get(settings["forecast_detail_attribute"]),
+                    now=now,
+                    horizon_minutes=settings["forecast_horizon"],
+                    period_minutes=settings["forecast_period_minutes"],
+                    attribute=settings["forecast_value_attribute"],
+                    unit=settings["forecast_detail_unit"],
+                )
+                if detail_fresh
+                else None
+            )
+            forecasts = forecasts or (None,)
+        if settings.get("forecast_updated_entity"):
+            updated = self.hass.states.get(settings["forecast_updated_entity"])
+            generated = aware_datetime(updated.state) if updated else None
+            if generated is None or not is_fresh(
+                now, generated, settings["forecast_generation_max_age"]
+            ):
+                forecasts = (None,)
+        # Multiple demo entries share their virtual power reservation if sources match.
+        reserved = sum(
+            other.runtime_data.settings["estimated_ac_power"]
+            for other in self.hass.config_entries.async_entries(DOMAIN)
+            if other.entry_id != self.entry.entry_id
+            and getattr(other, "runtime_data", None)
+            and getattr(other.runtime_data, "demo", None)
+            and other.runtime_data.demo.running
+            and settings.get("pv_power_entity")
+            and other.runtime_data.settings.get("pv_power_entity")
+            == settings.get("pv_power_entity")
+            and other.runtime_data.settings.get("load_power_entity")
+            == settings.get("load_power_entity")
+        )
+        snapshot = EnergySnapshot(
+            pv=data["pv_power"],
+            load=data["load_power"],
+            soc=data["soc"],
+            battery=data["battery_power"],
+            grid_power=data["grid_power"],
+            grid=grid,
+            forecasts=forecasts,
+            actual_ac_power=actual_ac,
+            other_virtual_power=reserved,
+            temperature_valid=decision.data_valid and ac_valid,
+            schedule_allowed=schedule is True,
+        )
+        strategy = decide(
+            snapshot,
+            self.demo,
+            settings,
+            now=now.timestamp(),
+            demand=decision.demand,
+            enabled=settings["enabled"],
+            manual=manual,
+        )
+        data.update(
+            {
+                "grid_available": grid,
+                "energy_allowed": strategy.energy_allowed,
+                "virtual_running": strategy.virtual_running,
+                "demo_action": strategy.action,
+                "strategy_reason": strategy.reason,
+                "solar_margin": strategy.solar_margin,
+                "forecast_margin": strategy.forecast_margin,
+                "seconds_to_start": round(strategy.seconds_to_start)
+                if strategy.seconds_to_start is not None
+                else None,
+                "seconds_to_stop": round(strategy.seconds_to_stop)
+                if strategy.seconds_to_stop is not None
+                else None,
+                "manual_pause": manual,
+                "manual_status": "disabled"
+                if not settings["enabled"]
+                else "manual_today"
+                if manual
+                else "automatic",
+                "energy_data_invalid": any(
+                    value is None
+                    for value in (
+                        data["pv_power"],
+                        data["load_power"],
+                        data["soc"],
+                        data["battery_power"],
+                        data["grid_power"],
+                        grid,
+                    )
+                )
+                or not ac_valid
+                or settings["require_forecast"]
+                and any(value is None for value in snapshot.forecasts),
+            }
+        )
+        if stored_before != self._stored_state():
+            self.store.async_delay_save(self._stored_state, 1)
         if self.data != data:
+            if self.data is None or self.data.get("strategy_reason") != strategy.reason:
+                LOGGER.debug(
+                    "Demo entry %s: %s (%s)", self.entry.entry_id, strategy.action, strategy.reason
+                )
             if self.data is None or self.data.get("reason") != decision.reason:
                 LOGGER.debug("Entry %s: %s", self.entry.entry_id, decision.reason)
             self.async_set_updated_data(data)
+
+    def _energy_value(self, source_key, now, kind):
+        entity_id = self.settings.get(source_key)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None or not is_fresh(
+            now, state.last_reported, self.settings["power_max_data_age"]
+        ):
+            return None
+        unit = state.attributes.get("unit_of_measurement")
+        value = (
+            soc_percent(state.state, unit)
+            if kind == "soc"
+            else signed_power_watts(state.state, unit)
+        )
+        return (
+            value
+            if kind in ("battery_power", "grid_power", "soc") or value is not None and value >= 0
+            else None
+        )
+
+    def _binary_value(self, source_key, now, max_age):
+        entity_id = self.settings.get(source_key)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None or state.state not in ("on", "off"):
+            return None
+        if max_age is not None and not is_fresh(now, state.last_reported, max_age):
+            return None
+        return state.state == "on"

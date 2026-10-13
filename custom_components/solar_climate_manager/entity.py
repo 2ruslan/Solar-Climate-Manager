@@ -20,5 +20,5 @@ class SolarClimateEntity(CoordinatorEntity):
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=f"Solar Climate Manager {coordinator.entry.title}",
             manufacturer="Solar Climate Manager",
-            model="Observation 0.1",
+            model="Demo strategy 0.2",
         )
