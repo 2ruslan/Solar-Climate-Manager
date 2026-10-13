@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Solar Climate Manager",
+        "description": "Версія 0.1 лише спостерігає та не керує кондиціонером.",
+        "data": {
+          "climate_entity": "Кондиціонер",
+          "temperature_entity": "Датчик кімнатної температури",
+          "target_temperature": "Цільова температура (°C)",
+          "hysteresis": "Гістерезис (±°C)",
+          "hvac_mode": "Режим термостата",
+          "max_data_age": "Максимальний вік температурних даних (секунди)",
+          "enabled": "Увімкнути спостереження"
+        }
+      }
+    },
+    "error": {
+      "invalid_climate": "Виберіть наявну кліматичну сутність.",
+      "unsupported_mode": "Кондиціонер не підтримує вибраний режим.",
+      "invalid_temperature": "Виберіть датчик температури з одиницями °C або °F."
+    },
+    "abort": {
+      "already_configured": "Цей кондиціонер уже налаштований."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Налаштування спостереження",
+        "data": {
+          "temperature_entity": "Датчик кімнатної температури",
+          "target_temperature": "Цільова температура (°C)",
+          "hysteresis": "Гістерезис (±°C)",
+          "hvac_mode": "Режим термостата",
+          "max_data_age": "Максимальний вік температурних даних (секунди)",
+          "enabled": "Увімкнути спостереження"
+        }
+      }
+    },
+    "error": {
+      "invalid_climate": "Виберіть наявну кліматичну сутність.",
+      "unsupported_mode": "Кондиціонер не підтримує вибраний режим.",
+      "invalid_temperature": "Виберіть датчик температури з одиницями °C або °F."
+    }
+  },
+  "selector": {
+    "hvac_mode": {
+      "options": {
+        "heat": "Обігрів",
+        "cool": "Охолодження"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {
+        "name": "Кімнатна температура"
+      },
+      "reason": {
+        "name": "Причина рішення",
+        "state": {
+          "invalid_data": "Дані недоступні або застарілі",
+          "disabled": "Спостереження вимкнено",
+          "temperature_demand": "Є потреба за температурою",
+          "temperature_satisfied": "Температурна потреба відсутня"
+        }
+      },
+      "automation_mode": {
+        "name": "Режим автоматизації",
+        "state": {
+          "observation": "Спостереження",
+          "disabled": "Вимкнено"
+        }
+      }
+    },
+    "binary_sensor": {
+      "demand": {
+        "name": "Потреба в обігріві або охолодженні"
+      },
+      "invalid_data": {
+        "name": "Дані недоступні або застарілі"
+      },
+      "control_allowed": {
+        "name": "Реальне керування дозволено"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Спостереження"
+      }
+    }
+  }
+}

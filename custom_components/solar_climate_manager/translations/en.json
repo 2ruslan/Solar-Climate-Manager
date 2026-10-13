@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Solar Climate Manager",
+        "description": "Version 0.1 observes only and never controls the air conditioner.",
+        "data": {
+          "climate_entity": "Air conditioner",
+          "temperature_entity": "Room temperature sensor",
+          "target_temperature": "Target temperature (°C)",
+          "hysteresis": "Hysteresis (±°C)",
+          "hvac_mode": "Thermostat mode",
+          "max_data_age": "Maximum temperature data age (seconds)",
+          "enabled": "Enable observation"
+        }
+      }
+    },
+    "error": {
+      "invalid_climate": "Select an existing climate entity.",
+      "unsupported_mode": "The climate entity does not support the selected mode.",
+      "invalid_temperature": "Select a temperature sensor with °C or °F units."
+    },
+    "abort": {
+      "already_configured": "This climate entity is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Observation settings",
+        "data": {
+          "temperature_entity": "Room temperature sensor",
+          "target_temperature": "Target temperature (°C)",
+          "hysteresis": "Hysteresis (±°C)",
+          "hvac_mode": "Thermostat mode",
+          "max_data_age": "Maximum temperature data age (seconds)",
+          "enabled": "Enable observation"
+        }
+      }
+    },
+    "error": {
+      "invalid_climate": "Select an existing climate entity.",
+      "unsupported_mode": "The climate entity does not support the selected mode.",
+      "invalid_temperature": "Select a temperature sensor with °C or °F units."
+    }
+  },
+  "selector": {
+    "hvac_mode": {
+      "options": {
+        "heat": "Heating",
+        "cool": "Cooling"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {
+        "name": "Room temperature"
+      },
+      "reason": {
+        "name": "Decision reason",
+        "state": {
+          "invalid_data": "Unavailable or stale data",
+          "disabled": "Observation disabled",
+          "temperature_demand": "Temperature demand",
+          "temperature_satisfied": "Temperature satisfied"
+        }
+      },
+      "automation_mode": {
+        "name": "Automation mode",
+        "state": {
+          "observation": "Observation",
+          "disabled": "Disabled"
+        }
+      }
+    },
+    "binary_sensor": {
+      "demand": {
+        "name": "Heating or cooling demand"
+      },
+      "invalid_data": {
+        "name": "Unavailable or stale data"
+      },
+      "control_allowed": {
+        "name": "Real control allowed"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Observation"
+      }
+    }
+  }
+}
