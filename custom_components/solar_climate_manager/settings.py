@@ -19,9 +19,6 @@ NUMERIC_SETTINGS = {
     "verification_delay": (0, 1800, 30, "s"),
     "adverse_power_delay": (0, 1800, 30, "s"),
     "grid_max_data_age": (30, 604800, 30, "s"),
-    "forecast_horizon": (30, 60, 30, "min"),
-    "forecast_period_minutes": (5, 60, 5, "min"),
-    "forecast_generation_max_age": (300, 172800, 300, "s"),
 }
 BOOLEAN_SETTINGS = [
     "prioritize_charging",

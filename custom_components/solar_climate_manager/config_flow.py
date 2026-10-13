@@ -4,7 +4,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES
+from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_FORECAST_SETTINGS
 from .settings import BOOLEAN_SETTINGS, NUMERIC_SETTINGS, valid_policy
 
 try:
@@ -66,17 +66,6 @@ def settings_schema(values):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Required(
-                    "forecast_max_data_age", default=values["forecast_max_data_age"]
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=30,
-                        max=86400,
-                        step=1,
-                        unit_of_measurement="s",
-                        mode=selector.NumberSelectorMode.BOX,
-                    )
-                ),
             }
         )
         .extend(
@@ -92,8 +81,6 @@ def settings_schema(values):
                     "grid_power_entity",
                     "ac_power_entity",
                     "soc_entity",
-                    "forecast_detail_entity",
-                    "forecast_updated_entity",
                 ]
             }
         )
@@ -135,15 +122,6 @@ def settings_schema(values):
                         options=["import", "export"], translation_key="grid_positive"
                     )
                 ),
-                vol.Required(
-                    "forecast_detail_attribute", default=values["forecast_detail_attribute"]
-                ): selector.TextSelector(),
-                vol.Required(
-                    "forecast_value_attribute", default=values["forecast_value_attribute"]
-                ): selector.TextSelector(),
-                vol.Required(
-                    "forecast_detail_unit", default=values["forecast_detail_unit"]
-                ): selector.SelectSelector(selector.SelectSelectorConfig(options=["W", "kW"])),
             }
         )
     )
@@ -184,8 +162,6 @@ def validate(hass, data):
         ("soc_entity", "sensor", "%"),
         ("grid_available_entity", "binary_sensor", None),
         ("schedule_entity", "schedule", None),
-        ("forecast_detail_entity", "sensor", None),
-        ("forecast_updated_entity", "sensor", None),
     ]:
         entity_id = data.get(key)
         if entity_id:
@@ -241,6 +217,9 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(self, user_input=None):
         values = {**DEFAULTS, **self.config_entry.data, **self.config_entry.options}
+        values = {
+            key: value for key, value in values.items() if key not in REMOVED_FORECAST_SETTINGS
+        }
         errors = {}
         if user_input is not None:
             # Missing optional fields explicitly disconnect their sources.

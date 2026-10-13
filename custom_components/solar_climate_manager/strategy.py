@@ -31,12 +31,6 @@ STRATEGY_DEFAULTS = {
     "battery_positive": "discharge",
     "grid_positive": "import",
     "pause_on_external_change": True,
-    "forecast_horizon": 60,
-    "forecast_period_minutes": 30,
-    "forecast_generation_max_age": 21600,
-    "forecast_detail_attribute": "detailedForecast",
-    "forecast_value_attribute": "pv_estimate",
-    "forecast_detail_unit": "kW",
 }
 
 ACTIONS = ["would_start", "would_continue", "would_stop", "wait"]

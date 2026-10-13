@@ -9,11 +9,10 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES
-from .forecast import aware_datetime, covered_forecast
+from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_FORECAST_SETTINGS
 from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
-from .power import read_power, signed_power_watts, soc_percent
+from .power import power_watts, read_power, signed_power_watts, soc_percent
 from .strategy import (
     DemoState,
     EnergySnapshot,
@@ -33,6 +32,11 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         super().__init__(hass, LOGGER, name=DOMAIN, config_entry=entry, always_update=False)
         self.entry = entry
         self.settings = {**DEFAULTS, **entry.data, **entry.options}
+        self.settings = {
+            key: value
+            for key, value in self.settings.items()
+            if key not in REMOVED_FORECAST_SETTINGS
+        }
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.demand = False
         self.signature = None
@@ -161,14 +165,16 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             source_id = settings.get(source_key)
             source = self.hass.states.get(source_id) if source_id else None
             data[key] = (
-                read_power(
-                    source.state,
-                    source.attributes.get("unit_of_measurement"),
-                    now=now,
-                    reported=source.last_reported,
-                    max_age=settings[
-                        "power_max_data_age" if key == "pv_power" else "forecast_max_data_age"
-                    ],
+                (
+                    read_power(
+                        source.state,
+                        source.attributes.get("unit_of_measurement"),
+                        now=now,
+                        reported=source.last_reported,
+                        max_age=settings["power_max_data_age"],
+                    )
+                    if key == "pv_power"
+                    else power_watts(source.state, source.attributes.get("unit_of_measurement"))
                 )
                 if source
                 else None
@@ -216,37 +222,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             and (not settings.get("battery_charge_power_entity") or measured_charge is not None)
             and data["house_load_power"] is not None
         )
-        forecast_keys = ("forecast_power_now", "forecast_power_30m") + (
-            ("forecast_power_60m",) if settings["forecast_horizon"] == 60 else ()
-        )
+        forecast_keys = ("forecast_power_now", "forecast_power_30m", "forecast_power_60m")
         forecasts = tuple(data[key] for key in forecast_keys)
-        if settings.get("forecast_detail_entity"):
-            detail = self.hass.states.get(settings["forecast_detail_entity"])
-            detail_fresh = (
-                detail is not None
-                and detail.state not in ("unknown", "unavailable")
-                and is_fresh(now, detail.last_reported, settings["forecast_generation_max_age"])
-            )
-            forecasts = (
-                covered_forecast(
-                    detail.attributes.get(settings["forecast_detail_attribute"]),
-                    now=now,
-                    horizon_minutes=settings["forecast_horizon"],
-                    period_minutes=settings["forecast_period_minutes"],
-                    attribute=settings["forecast_value_attribute"],
-                    unit=settings["forecast_detail_unit"],
-                )
-                if detail_fresh
-                else None
-            )
-            forecasts = forecasts or (None,)
-        if settings.get("forecast_updated_entity"):
-            updated = self.hass.states.get(settings["forecast_updated_entity"])
-            generated = aware_datetime(updated.state) if updated else None
-            if generated is None or not is_fresh(
-                now, generated, settings["forecast_generation_max_age"]
-            ):
-                forecasts = (None,)
         # Multiple demo entries share their virtual power reservation if sources match.
         reserved = sum(
             other.runtime_data.settings["estimated_ac_power"]

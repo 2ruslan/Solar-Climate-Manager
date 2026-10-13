@@ -24,9 +24,18 @@ ENERGY_SOURCES = {
 OPTIONAL_SOURCES = [
     *POWER_SOURCES.values(),
     *ENERGY_SOURCES.values(),
+]
+REMOVED_FORECAST_SETTINGS = {
     "forecast_detail_entity",
     "forecast_updated_entity",
-]
+    "forecast_max_data_age",
+    "forecast_detail_attribute",
+    "forecast_value_attribute",
+    "forecast_detail_unit",
+    "forecast_generation_max_age",
+    "forecast_period_minutes",
+    "forecast_horizon",
+}
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
 DEFAULTS = {
     **STRATEGY_DEFAULTS,
@@ -36,5 +45,4 @@ DEFAULTS = {
     "max_data_age": 900,
     "enabled": True,
     "power_max_data_age": 900,
-    "forecast_max_data_age": 1800,
 }
