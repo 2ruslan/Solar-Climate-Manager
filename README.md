@@ -1,4 +1,4 @@
-# Solar Climate Manager — 0.2.2 (демо)
+# Solar Climate Manager — 0.2.3 (демо)
 
 [![Відкрити Solar Climate Manager у HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=2ruslan&repository=Solar-Climate-Manager&category=integration)
 

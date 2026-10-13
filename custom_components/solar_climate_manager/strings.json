@@ -50,8 +50,7 @@
           "battery_positive": "Positive battery power means",
           "grid_positive": "Positive grid power means",
           "pause_on_external_change": "Pause demo until midnight on external climate changes",
-          "load_includes_battery_charging": "Total consumption includes battery charging",
-          "battery_charge_power_entity": "Separate positive battery charging power sensor (optional)"
+          "load_includes_battery_charging": "Total consumption includes battery charging"
         }
       }
     },
@@ -116,8 +115,7 @@
           "battery_positive": "Positive battery power means",
           "grid_positive": "Positive grid power means",
           "pause_on_external_change": "Pause demo until midnight on external climate changes",
-          "load_includes_battery_charging": "Total consumption includes battery charging",
-          "battery_charge_power_entity": "Separate positive battery charging power sensor (optional)"
+          "load_includes_battery_charging": "Total consumption includes battery charging"
         },
         "description": "Demo only: no climate or inverter commands. Select energy sources and check power signs. Missing essential sources block virtual starts. Optional sources may be cleared."
       }
@@ -259,7 +257,7 @@
         "name": "House load excluding battery charging"
       },
       "battery_charge_power": {
-        "name": "Battery charging power"
+        "name": "Calculated battery charging power"
       }
     },
     "binary_sensor": {

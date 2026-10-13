@@ -4,7 +4,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_FORECAST_SETTINGS
+from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_SETTINGS
 from .settings import BOOLEAN_SETTINGS, NUMERIC_SETTINGS, valid_policy
 
 try:
@@ -77,7 +77,6 @@ def settings_schema(values):
                     *POWER_SOURCES.values(),
                     "load_power_entity",
                     "battery_power_entity",
-                    "battery_charge_power_entity",
                     "grid_power_entity",
                     "ac_power_entity",
                     "soc_entity",
@@ -145,7 +144,6 @@ def validate(hass, data):
         *POWER_SOURCES.values(),
         "load_power_entity",
         "battery_power_entity",
-        "battery_charge_power_entity",
         "grid_power_entity",
         "ac_power_entity",
     ]:
@@ -217,9 +215,7 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(self, user_input=None):
         values = {**DEFAULTS, **self.config_entry.data, **self.config_entry.options}
-        values = {
-            key: value for key, value in values.items() if key not in REMOVED_FORECAST_SETTINGS
-        }
+        values = {key: value for key, value in values.items() if key not in REMOVED_SETTINGS}
         errors = {}
         if user_input is not None:
             # Missing optional fields explicitly disconnect their sources.

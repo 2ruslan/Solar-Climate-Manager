@@ -9,7 +9,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_FORECAST_SETTINGS
+from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_SETTINGS
 from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
 from .power import power_watts, read_power, signed_power_watts, soc_percent
@@ -33,9 +33,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.settings = {**DEFAULTS, **entry.data, **entry.options}
         self.settings = {
-            key: value
-            for key, value in self.settings.items()
-            if key not in REMOVED_FORECAST_SETTINGS
+            key: value for key, value in self.settings.items() if key not in REMOVED_SETTINGS
         }
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.demand = False
@@ -182,7 +180,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         for key in (
             "load_power",
             "battery_power",
-            "battery_charge_power",
             "grid_power",
             "soc",
             "ac_power",
@@ -193,12 +190,9 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         if data["grid_power"] is not None and settings["grid_positive"] == "export":
             data["grid_power"] *= -1
         measured_charge = (
-            data["battery_charge_power"]
-            if settings.get("battery_charge_power_entity")
-            else max(0, -data["battery_power"])
-            if data["battery_power"] is not None
-            else None
+            max(0, -data["battery_power"]) if data["battery_power"] is not None else None
         )
+        data["battery_charge_power"] = measured_charge
         data["house_load_power"] = house_load_power(
             data["load_power"], measured_charge, settings["load_includes_battery_charging"]
         )
@@ -217,11 +211,9 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 if climate and climate.attributes.get("hvac_action") in ("heating", "cooling")
                 else 0
             )
-        ac_valid = (
-            (not settings.get("ac_power_entity") or data["ac_power"] is not None)
-            and (not settings.get("battery_charge_power_entity") or measured_charge is not None)
-            and data["house_load_power"] is not None
-        )
+        ac_valid = (not settings.get("ac_power_entity") or data["ac_power"] is not None) and data[
+            "house_load_power"
+        ] is not None
         forecast_keys = ("forecast_power_now", "forecast_power_30m", "forecast_power_60m")
         forecasts = tuple(data[key] for key in forecast_keys)
         # Multiple demo entries share their virtual power reservation if sources match.
@@ -243,7 +235,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             load=data["load_power"],
             soc=data["soc"],
             battery=data["battery_power"],
-            battery_charge=measured_charge,
             grid_power=data["grid_power"],
             grid=grid,
             forecasts=forecasts,
