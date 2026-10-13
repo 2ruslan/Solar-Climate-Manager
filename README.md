@@ -1,6 +1,17 @@
 # Solar Climate Manager — 0.1.0
 
+[![Відкрити Solar Climate Manager у HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=2ruslan&repository=Solar-Climate-Manager&category=integration)
+
 Власна інтеграція Home Assistant для майбутнього керування кондиціонерами з урахуванням сонячної енергії. **Версія 0.1 працює виключно в режимі спостереження і не викликає жодних сервісів кондиціонера.** Реальне керування не можна увімкнути до реалізації енергетичних захистів версії 0.2.
+
+## Установлення через HACS
+
+1. HACS має бути встановлений і налаштований у вашому Home Assistant.
+2. Натисніть кнопку вище. Якщо My Home Assistant попросить адресу вашої інсталяції, вкажіть її.
+3. У HACS підтвердьте додавання репозиторію та натисніть **Download / Завантажити**. Кнопка відкриває репозиторій; установлення потребує підтвердження в HACS.
+4. Перезапустіть Home Assistant і додайте **Solar Climate Manager** через **Налаштування → Пристрої та служби → Додати інтеграцію**.
+
+Якщо посилання не відкривається, у HACS відкрийте **Custom repositories / Користувацькі репозиторії**, додайте `https://github.com/2ruslan/Solar-Climate-Manager` із типом **Integration**, а потім завантажте інтеграцію.
 
 ## Установлення та перевірка
 
