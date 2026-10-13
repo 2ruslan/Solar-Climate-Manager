@@ -1,4 +1,4 @@
-# Solar Climate Manager — 0.2.3 (демо)
+# Solar Climate Manager — 0.2.4 (демо)
 
 [![Відкрити Solar Climate Manager у HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=2ruslan&repository=Solar-Climate-Manager&category=integration)
 
@@ -86,3 +86,9 @@ HA API опрацьовано за актуальною офіційною до�
 Архітектура й план наступних версій: [docs/architecture.md](docs/architecture.md).
 
 Офіційні вимоги: [Config Flow](https://developers.home-assistant.io/docs/core/integration/config_flow/), [Options Flow](https://developers.home-assistant.io/docs/core/integration/options_flow/), [runtime_data](https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/runtime-data/), [manifest](https://developers.home-assistant.io/docs/creating_integration_manifest/), [HACS](https://www.hacs.dev/docs/publish/integration/).
+
+## Спрощені налаштування — 0.2.4
+
+«Налаштувати» відкриває меню: **Джерела даних → Комфорт → Енергетика → Розширені** (незалежні розділи, не послідовні кроки). Редагування одного розділу зберігає інші, включно з вимкненим спостереженням. Ліміти імпорту й бюджету заряджання показуються наступним кроком енергетики лише для ввімкнених функцій; вимкнення функції не стирає збережений ліміт.
+
+Прогноз і ручний пріоритет тепер постійні правила. Пробні старти за прогнозом видалено: запуск потребує фактичного надлишку або явно дозволеного обмеженого імпорту. Перемикач спостереження залишається на пристрої/картці, його дубль у формі прибрано. Під час нового додавання вибираються лише climate, температура та комфорт; енергетичні джерела вибираються через «Налаштувати» після додавання. До їх налаштування демо-старт заблокований.

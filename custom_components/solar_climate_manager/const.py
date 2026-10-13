@@ -2,6 +2,7 @@
 
 from homeassistant.const import Platform
 
+from .settings import RETIRED_RULES
 from .strategy import STRATEGY_DEFAULTS
 
 DOMAIN = "solar_climate_manager"
@@ -36,7 +37,7 @@ REMOVED_FORECAST_SETTINGS = {
     "forecast_horizon",
 }
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
-REMOVED_SETTINGS = REMOVED_FORECAST_SETTINGS | {"battery_charge_power_entity"}
+REMOVED_SETTINGS = REMOVED_FORECAST_SETTINGS | {"battery_charge_power_entity"} | RETIRED_RULES
 DEFAULTS = {
     **STRATEGY_DEFAULTS,
     "target_temperature": 23.0,

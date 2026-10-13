@@ -23,13 +23,58 @@ NUMERIC_SETTINGS = {
 BOOLEAN_SETTINGS = [
     "prioritize_charging",
     "allow_grid_import",
-    "require_forecast",
-    "allow_forecast_trial",
     "load_includes_ac",
     "load_includes_battery_charging",
     "grid_on_means_available",
-    "pause_on_external_change",
 ]
+
+ADVANCED_KEYS = {
+    "max_data_age",
+    "power_max_data_age",
+    "grid_max_data_age",
+    "energy_hysteresis",
+    "verification_delay",
+    "adverse_power_delay",
+    "max_battery_discharge",
+    "start_delay",
+    "shortage_delay",
+    "grid_absence_delay",
+    "minimum_run_time",
+    "minimum_off_time",
+}
+COMFORT_KEYS = {
+    "temperature_entity",
+    "target_temperature",
+    "hysteresis",
+    "hvac_mode",
+    "schedule_entity",
+}
+ENERGY_KEYS = {
+    "estimated_ac_power",
+    "power_reserve",
+    "minimum_soc",
+    "critical_soc",
+    "battery_reserve_soc",
+    "prioritize_charging",
+    "allow_grid_import",
+}
+SOURCE_FLAGS = {
+    "load_includes_ac",
+    "load_includes_battery_charging",
+    "grid_on_means_available",
+    "battery_positive",
+    "grid_positive",
+}
+RETIRED_RULES = {"require_forecast", "allow_forecast_trial", "pause_on_external_change"}
+
+
+def merge_section(values, updates, *, clear_sources=(), removed=()):
+    """Editing one section must preserve every other section and enabled state."""
+    merged = {key: value for key, value in values.items() if key not in removed}
+    merged.update(updates)
+    for key in clear_sources:
+        merged[key] = updates.get(key)
+    return merged
 
 
 def valid_policy(values):

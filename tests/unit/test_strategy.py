@@ -62,9 +62,9 @@ class StrategyTests(unittest.TestCase):
         self.cfg["start_delay"] = 0
         self.cfg["verification_delay"] = 180
         low = replace(self.snapshot, pv=500)
-        self.assertEqual(self.decide(0, low).reason, "forecast_trial")
-        self.assertEqual(self.decide(179, low).action, "would_continue")
-        self.assertEqual(self.decide(180, low).reason, "verification_failed")
+        self.assertEqual(self.decide(0, low).action, "wait")
+        self.assertEqual(self.decide(179, low).action, "wait")
+        self.assertEqual(self.decide(180, low).action, "wait")
 
     def test_critical_soc_overrides_minimum_run_and_missing_forecast(self):
         self.start()
@@ -86,7 +86,7 @@ class StrategyTests(unittest.TestCase):
             "invalid_energy_data",
         )
         self.cfg["require_forecast"] = False
-        self.assertTrue(
+        self.assertFalse(
             self.decide(0, replace(self.snapshot, forecasts=(None, None, None))).energy_allowed
         )
 
@@ -120,6 +120,12 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(self.decide(0, low).energy_allowed)
         self.cfg["max_grid_import"] = 1500
         self.assertTrue(self.decide(0, low).energy_allowed)
+
+    def test_disabled_grid_import_does_not_use_hidden_limit(self):
+        self.cfg.update(allow_grid_import=False, max_grid_import=1500)
+        result = self.decide(0, replace(self.snapshot, grid_power=50))
+        self.assertFalse(result.energy_allowed)
+        self.assertEqual(result.reason, "grid_import")
 
     def test_charge_priority_and_reserve_protection(self):
         limited = replace(self.snapshot, pv=2100, soc=88, battery=-500)

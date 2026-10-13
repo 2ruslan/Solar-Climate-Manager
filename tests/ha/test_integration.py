@@ -14,6 +14,15 @@ def inputs():
     return {**DEFAULTS, "climate_entity": "climate.test", "temperature_entity": "sensor.room"}
 
 
+def basic_inputs():
+    return {
+        key: value
+        for key, value in inputs().items()
+        if key
+        in {"climate_entity", "temperature_entity", "target_temperature", "hysteresis", "hvac_mode"}
+    }
+
+
 def states(hass, temperature="21"):
     hass.states.async_set("climate.test", "off", {"hvac_modes": ["off", "heat", "cool"]})
     hass.states.async_set(
@@ -34,7 +43,7 @@ async def test_flow_and_duplicate(hass):
     states(hass)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     assert result["type"] == "form"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], inputs())
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], basic_inputs())
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
     duplicate = await hass.config_entries.flow.async_init(
@@ -76,9 +85,18 @@ async def test_reload_restores_hysteresis_and_options_reset(hass):
     await hass.async_block_till_done()
     assert entry.runtime_data.data["demand"]
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == "menu"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "comfort"}
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {**DEFAULTS, "target_temperature": 20, "temperature_entity": "sensor.room"},
+        {
+            "target_temperature": 20,
+            "temperature_entity": "sensor.room",
+            "hysteresis": 1,
+            "hvac_mode": "heat",
+        },
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
@@ -119,7 +137,17 @@ async def test_solar_sources_independent_of_temperature(hass):
     assert entry.runtime_data.data["demand"]
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {**DEFAULTS, "temperature_entity": "sensor.room"}
+        result["flow_id"], {"next_step_id": "sources"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "load_includes_ac": True,
+            "load_includes_battery_charging": False,
+            "grid_on_means_available": True,
+            "battery_positive": "discharge",
+            "grid_positive": "import",
+        },
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()

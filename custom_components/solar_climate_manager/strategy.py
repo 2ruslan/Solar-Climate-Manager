@@ -15,8 +15,6 @@ STRATEGY_DEFAULTS = {
     "max_battery_discharge": 100,
     "allow_grid_import": False,
     "max_grid_import": 300,
-    "require_forecast": True,
-    "allow_forecast_trial": False,
     "start_delay": 600,
     "shortage_delay": 600,
     "grid_absence_delay": 600,
@@ -30,7 +28,6 @@ STRATEGY_DEFAULTS = {
     "grid_on_means_available": True,
     "battery_positive": "discharge",
     "grid_positive": "import",
-    "pause_on_external_change": True,
 }
 
 ACTIONS = ["would_start", "would_continue", "would_stop", "wait"]
@@ -45,7 +42,6 @@ REASONS = [
     "battery_discharge",
     "grid_import",
     "outage_deficit",
-    "verification_failed",
     "no_temperature_demand",
     "minimum_run",
     "insufficient_surplus",
@@ -54,7 +50,6 @@ REASONS = [
     "minimum_off",
     "solar_ready",
     "grid_ready",
-    "forecast_trial",
     "running",
     "energy_deficit",
 ]
@@ -84,7 +79,6 @@ class DemoState:
     deficit_since: float | None = None
     grid_absent_since: float | None = None
     adverse_since: float | None = None
-    trial: bool = False
 
     def restore(self, data, now):
         """Retain minimum-cycle deadlines; requalify continuity after downtime."""
@@ -93,7 +87,6 @@ class DemoState:
         self.last_start = valid_timestamp(data.get("last_start"), now)
         self.last_stop = valid_timestamp(data.get("last_stop"), now)
         self.running = data.get("running") is True and self.last_start is not None
-        self.trial = data.get("trial") is True and self.running
 
 
 def valid_timestamp(value, now):
@@ -146,7 +139,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
 
     def halt(reason):
         was_running = state.running
-        state.running = state.trial = False
+        state.running = False
         if was_running:
             state.last_stop = now
         state.surplus_since = state.deficit_since = state.adverse_since = None
@@ -203,26 +196,19 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
     )
     if forecasts_valid:
         forecast_margin = round(min(snapshot.forecasts) - required, 1)
-    forecast_start = (
-        not cfg["require_forecast"]
-        or forecasts_valid
-        and forecast_margin >= cfg["energy_hysteresis"]
-    )
-    forecast_hold = (
-        not cfg["require_forecast"]
-        or forecasts_valid
-        and forecast_margin >= -cfg["energy_hysteresis"]
-    )
-    if cfg["require_forecast"] and not forecasts_valid:
+    forecast_start = forecasts_valid and forecast_margin >= cfg["energy_hysteresis"]
+    forecast_hold = forecasts_valid and forecast_margin >= -cfg["energy_hysteresis"]
+    if not forecasts_valid:
         return halt("invalid_energy_data")
     if (
         snapshot.soc < cfg["battery_reserve_soc"]
         and snapshot.battery > cfg["max_battery_discharge"]
     ):
         return halt("reserve_protection")
+    grid_limit = cfg["max_grid_import"] if cfg["allow_grid_import"] else 0
     actual_safe = (
         snapshot.battery <= cfg["max_battery_discharge"]
-        and snapshot.grid_power <= cfg["max_grid_import"]
+        and snapshot.grid_power <= grid_limit
     )
     additional_draw = (
         max(0, cfg["estimated_ac_power"] - snapshot.actual_ac_power) + snapshot.other_virtual_power
@@ -234,21 +220,12 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         and actual_safe
     )
     solar_ready = solar_margin >= cfg["energy_hysteresis"] and forecast_start and actual_safe
-    trial_ready = (
-        cfg["allow_forecast_trial"]
-        and forecasts_valid
-        and forecast_margin >= cfg["energy_hysteresis"]
-        and snapshot.soc >= cfg["battery_reserve_soc"]
-        and actual_safe
-    )
-    candidate = solar_ready or grid_ready or trial_ready
+    candidate = solar_ready or grid_ready
     hold = solar_margin >= -cfg["energy_hysteresis"] and forecast_hold or grid_ready
 
     if state.running:
         run_left = remaining(now, state.last_start, cfg["minimum_run_time"])
         verification_left = remaining(now, state.last_start, cfg["verification_delay"])
-        if state.trial and not hold and verification_left == 0:
-            return halt("verification_failed")
         if not actual_safe and verification_left == 0:
             if state.adverse_since is None:
                 state.adverse_since = now
@@ -273,18 +250,15 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             )
             if outage_left is not None and outage_left == 0 and shortage_left == 0:
                 return halt("outage_deficit")
-            if shortage_left == 0 and run_left == 0 and not state.trial:
+            if shortage_left == 0 and run_left == 0:
                 return halt("energy_deficit")
         else:
             state.deficit_since = None
             shortage_left = outage_left = None
-            state.trial = False
         if not demand and run_left == 0:
             return halt("no_temperature_demand")
         if not demand:
             return result("would_continue", "minimum_run", candidate, stop=run_left)
-        if state.trial:
-            return result("would_continue", "forecast_trial", candidate, stop=verification_left)
         deadlines = [
             value
             for value in (
@@ -320,7 +294,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         )
         if snapshot.battery > cfg["max_battery_discharge"]:
             reason = "battery_discharge"
-        elif snapshot.grid_power > cfg["max_grid_import"]:
+        elif snapshot.grid_power > grid_limit:
             reason = "grid_import"
         return result("wait", reason)
     if state.surplus_since is None:
@@ -341,11 +315,10 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         )
     state.running = True
     state.last_start = now
-    state.trial = not solar_ready and not grid_ready
     state.surplus_since = None
     return result(
         "would_start",
-        "forecast_trial" if state.trial else "solar_ready" if solar_ready else "grid_ready",
+        "solar_ready" if solar_ready else "grid_ready",
         True,
     )
 

@@ -98,10 +98,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
 
     @callback
     def _state_changed(self, event):
-        if (
-            event.data.get("entity_id") == self.settings["climate_entity"]
-            and self.settings["pause_on_external_change"]
-        ):
+        if event.data.get("entity_id") == self.settings["climate_entity"]:
             old = event.data.get("old_state")
             new = event.data.get("new_state")
             before = control_fingerprint(old.state, old.attributes) if old else None
@@ -285,8 +282,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                     )
                 )
                 or not ac_valid
-                or settings["require_forecast"]
-                and any(value is None for value in snapshot.forecasts),
+                or any(value is None for value in snapshot.forecasts),
             }
         )
         if stored_before != self._stored_state():
