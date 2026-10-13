@@ -171,3 +171,17 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.coordinator._evaluate()
         self.assertTrue(self.coordinator.data["energy_data_invalid"])
         self.assertEqual(self.coordinator.data["strategy_reason"], "invalid_energy_data")
+
+    async def test_inclusive_load_and_separate_charge_mapping(self):
+        self.coordinator.settings["load_includes_battery_charging"] = True
+        self.coordinator.settings["battery_charge_power_entity"] = "sensor.charge"
+        self.put("sensor.house", "1.6", unit_of_measurement="kW")
+        self.put("sensor.charge", "1000", unit_of_measurement="W")
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["load_power"], 1600)
+        self.assertEqual(self.coordinator.data["house_load_power"], 600)
+        self.assertEqual(self.coordinator.data["solar_margin"], 1000)
+        self.put("sensor.charge", "unavailable")
+        self.coordinator._evaluate()
+        self.assertIsNone(self.coordinator.data["house_load_power"])
+        self.assertTrue(self.coordinator.data["energy_data_invalid"])

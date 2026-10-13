@@ -14,7 +14,14 @@ from .forecast import aware_datetime, covered_forecast
 from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
 from .power import read_power, signed_power_watts, soc_percent
-from .strategy import DemoState, EnergySnapshot, decide, serialize, valid_timestamp
+from .strategy import (
+    DemoState,
+    EnergySnapshot,
+    decide,
+    house_load_power,
+    serialize,
+    valid_timestamp,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -166,12 +173,29 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 if source
                 else None
             )
-        for key in ("load_power", "battery_power", "grid_power", "soc", "ac_power"):
+        for key in (
+            "load_power",
+            "battery_power",
+            "battery_charge_power",
+            "grid_power",
+            "soc",
+            "ac_power",
+        ):
             data[key] = self._energy_value(f"{key}_entity", now, key)
         if data["battery_power"] is not None and settings["battery_positive"] == "charge":
             data["battery_power"] *= -1
         if data["grid_power"] is not None and settings["grid_positive"] == "export":
             data["grid_power"] *= -1
+        measured_charge = (
+            data["battery_charge_power"]
+            if settings.get("battery_charge_power_entity")
+            else max(0, -data["battery_power"])
+            if data["battery_power"] is not None
+            else None
+        )
+        data["house_load_power"] = house_load_power(
+            data["load_power"], measured_charge, settings["load_includes_battery_charging"]
+        )
         grid = self._binary_value("grid_available_entity", now, settings["grid_max_data_age"])
         if grid is not None and not settings["grid_on_means_available"]:
             grid = not grid
@@ -187,7 +211,11 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 if climate and climate.attributes.get("hvac_action") in ("heating", "cooling")
                 else 0
             )
-        ac_valid = not settings.get("ac_power_entity") or data["ac_power"] is not None
+        ac_valid = (
+            (not settings.get("ac_power_entity") or data["ac_power"] is not None)
+            and (not settings.get("battery_charge_power_entity") or measured_charge is not None)
+            and data["house_load_power"] is not None
+        )
         forecast_keys = ("forecast_power_now", "forecast_power_30m") + (
             ("forecast_power_60m",) if settings["forecast_horizon"] == 60 else ()
         )
@@ -238,6 +266,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             load=data["load_power"],
             soc=data["soc"],
             battery=data["battery_power"],
+            battery_charge=measured_charge,
             grid_power=data["grid_power"],
             grid=grid,
             forecasts=forecasts,

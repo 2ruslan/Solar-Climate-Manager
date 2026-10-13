@@ -26,6 +26,7 @@ STRATEGY_DEFAULTS = {
     "adverse_power_delay": 60,
     "grid_max_data_age": 86400,
     "load_includes_ac": True,
+    "load_includes_battery_charging": False,
     "grid_on_means_available": True,
     "battery_positive": "discharge",
     "grid_positive": "import",
@@ -71,6 +72,7 @@ class EnergySnapshot:
     load: float | None = None
     soc: float | None = None
     battery: float | None = None  # positive = discharge
+    battery_charge: float | None = None  # optional independent positive charging sensor
     grid_power: float | None = None  # positive = import
     grid: bool | None = None
     forecasts: tuple = (None, None, None)
@@ -114,6 +116,17 @@ def valid_timestamp(value, now):
 
 def remaining(now, since, duration):
     return max(0, duration - (now - since)) if since is not None else duration
+
+
+def house_load_power(total, charge, includes_charging):
+    """Remove measured charging exactly once, never battery discharge."""
+    if total is None or not isfinite(total) or total < 0:
+        return None
+    if not includes_charging:
+        return total
+    if charge is None or not isfinite(charge) or charge < 0 or charge > total:
+        return None
+    return round(total - charge, 1)
 
 
 @dataclass(frozen=True)
@@ -172,13 +185,21 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
     else:
         state.grid_absent_since = None
 
+    measured_charge = (
+        snapshot.battery_charge
+        if snapshot.battery_charge is not None
+        else max(0, -snapshot.battery)
+    )
+    house_load = house_load_power(
+        snapshot.load, measured_charge, cfg["load_includes_battery_charging"]
+    )
+    if house_load is None:
+        return halt("invalid_energy_data")
     charge_budget = 0
     if cfg["prioritize_charging"] and snapshot.soc < cfg["battery_reserve_soc"]:
-        charge_budget = max(cfg["charging_reserve_power"], -snapshot.battery)
+        charge_budget = max(cfg["charging_reserve_power"], measured_charge)
     base_load = (
-        max(0, snapshot.load - snapshot.actual_ac_power)
-        if cfg["load_includes_ac"]
-        else snapshot.load
+        max(0, house_load - snapshot.actual_ac_power) if cfg["load_includes_ac"] else house_load
     )
     required = (
         base_load

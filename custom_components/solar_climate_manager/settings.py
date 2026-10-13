@@ -29,6 +29,7 @@ BOOLEAN_SETTINGS = [
     "require_forecast",
     "allow_forecast_trial",
     "load_includes_ac",
+    "load_includes_battery_charging",
     "grid_on_means_available",
     "pause_on_external_change",
 ]

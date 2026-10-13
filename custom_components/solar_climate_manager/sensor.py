@@ -10,6 +10,8 @@ from .strategy import ACTIONS, REASONS
 POWER_KEYS = [
     *POWER_SOURCES,
     "load_power",
+    "house_load_power",
+    "battery_charge_power",
     "battery_power",
     "grid_power",
     "ac_power",

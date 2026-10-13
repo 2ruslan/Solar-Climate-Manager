@@ -88,6 +88,7 @@ def settings_schema(values):
                     *POWER_SOURCES.values(),
                     "load_power_entity",
                     "battery_power_entity",
+                    "battery_charge_power_entity",
                     "grid_power_entity",
                     "ac_power_entity",
                     "soc_entity",
@@ -166,6 +167,7 @@ def validate(hass, data):
         *POWER_SOURCES.values(),
         "load_power_entity",
         "battery_power_entity",
+        "battery_charge_power_entity",
         "grid_power_entity",
         "ac_power_entity",
     ]:

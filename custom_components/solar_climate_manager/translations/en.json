@@ -18,7 +18,7 @@
           "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
           "power_max_data_age": "Maximum PV reading age (seconds)",
           "forecast_max_data_age": "Maximum forecast sensor report age (seconds)",
-          "load_power_entity": "House load power sensor (excluding battery charging)",
+          "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
           "grid_power_entity": "Signed grid import/export power sensor",
@@ -58,7 +58,9 @@
           "forecast_detail_unit": "Detailed forecast power units",
           "forecast_horizon": "Forecast horizon (minutes)",
           "forecast_period_minutes": "Forecast period duration (minutes)",
-          "forecast_generation_max_age": "Maximum detailed forecast / generation age (seconds)"
+          "forecast_generation_max_age": "Maximum detailed forecast / generation age (seconds)",
+          "load_includes_battery_charging": "Total consumption includes battery charging",
+          "battery_charge_power_entity": "Separate positive battery charging power sensor (optional)"
         }
       }
     },
@@ -91,7 +93,7 @@
           "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
           "power_max_data_age": "Maximum PV reading age (seconds)",
           "forecast_max_data_age": "Maximum forecast sensor report age (seconds)",
-          "load_power_entity": "House load power sensor (excluding battery charging)",
+          "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
           "grid_power_entity": "Signed grid import/export power sensor",
@@ -131,7 +133,9 @@
           "forecast_detail_unit": "Detailed forecast power units",
           "forecast_horizon": "Forecast horizon (minutes)",
           "forecast_period_minutes": "Forecast period duration (minutes)",
-          "forecast_generation_max_age": "Maximum detailed forecast / generation age (seconds)"
+          "forecast_generation_max_age": "Maximum detailed forecast / generation age (seconds)",
+          "load_includes_battery_charging": "Total consumption includes battery charging",
+          "battery_charge_power_entity": "Separate positive battery charging power sensor (optional)"
         },
         "description": "Demo only: no climate or inverter commands. Select energy sources and check power signs. Missing essential sources block virtual starts. Optional sources may be cleared."
       }
@@ -199,7 +203,7 @@
         "name": "Forecast power in 1 hour"
       },
       "load_power": {
-        "name": "House load power"
+        "name": "Total consumption power"
       },
       "battery_power": {
         "name": "Battery power discharge positive"
@@ -268,6 +272,12 @@
           "manual_today": "Manual priority until midnight",
           "disabled": "Disabled"
         }
+      },
+      "house_load_power": {
+        "name": "House load excluding battery charging"
+      },
+      "battery_charge_power": {
+        "name": "Battery charging power"
       }
     },
     "binary_sensor": {

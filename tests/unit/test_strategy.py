@@ -128,6 +128,36 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(self.decide(0, limited).energy_allowed)
         self.assertEqual(self.decide(0, replace(limited, battery=200)).reason, "reserve_protection")
 
+    def test_inclusive_load_matches_exclusive_load_without_double_counting(self):
+        exclusive = replace(self.snapshot, soc=88, battery=-1000)
+        baseline = self.decide(0, exclusive)
+        self.cfg["load_includes_battery_charging"] = True
+        inclusive = replace(exclusive, load=1600)
+        result = self.decide(0, inclusive)
+        self.assertEqual(result.solar_margin, baseline.solar_margin)
+        self.assertEqual(result.forecast_margin, baseline.forecast_margin)
+
+    def test_separate_charge_sensor_used_once(self):
+        self.cfg["load_includes_battery_charging"] = True
+        snapshot = replace(self.snapshot, load=1600, battery=0, battery_charge=1000)
+        self.assertEqual(self.decide(0, snapshot).solar_margin, 1000)
+        self.cfg["prioritize_charging"] = False
+        snapshot = replace(snapshot, soc=88)
+        self.assertEqual(self.decide(0, snapshot).solar_margin, 1000)
+
+    def test_discharge_not_subtracted_from_load(self):
+        self.cfg["load_includes_battery_charging"] = True
+        self.assertEqual(policy.house_load_power(600, 0, True), 600)
+        snapshot = replace(self.snapshot, battery=50)
+        self.assertEqual(self.decide(0, snapshot).solar_margin, 1000)
+
+    def test_charge_greater_than_total_is_invalid(self):
+        self.cfg["load_includes_battery_charging"] = True
+        self.assertEqual(
+            self.decide(0, replace(self.snapshot, battery_charge=1000)).reason,
+            "invalid_energy_data",
+        )
+
     def test_unwanted_discharge_and_import_stop_after_confirmation(self):
         for field, reason in [("battery", "battery_discharge"), ("grid_power", "grid_import")]:
             self.state = policy.DemoState()

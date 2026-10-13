@@ -14,6 +14,7 @@ POWER_SOURCES = {
 ENERGY_SOURCES = {
     "load_power": "load_power_entity",
     "battery_power": "battery_power_entity",
+    "battery_charge_power": "battery_charge_power_entity",
     "grid_power": "grid_power_entity",
     "soc": "soc_entity",
     "grid_available": "grid_available_entity",
