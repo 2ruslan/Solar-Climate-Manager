@@ -117,7 +117,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_demo_starts_without_a_services_api(self):
         self.assertEqual(self.coordinator.data["demo_action"], "wait")
-        clock.current += timedelta(seconds=60)
+        clock.current += timedelta(seconds=600)
         self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["demo_action"], "would_start")
         self.assertTrue(self.coordinator.data["virtual_running"])
@@ -154,6 +154,8 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("sensor.battery", "-500", unit_of_measurement="W")
         self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["battery_power"], 500)
+        clock.current += timedelta(seconds=601)
+        self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["strategy_reason"], "battery_discharge")
         self.states["sensor.soc"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
@@ -204,7 +206,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["load_power"], 1600)
         self.assertEqual(self.coordinator.data["house_load_power"], 600)
         self.assertEqual(self.coordinator.data["battery_charge_power"], 1000)
-        self.assertEqual(self.coordinator.data["solar_margin"], 1000)
+        self.assertEqual(self.coordinator.data["solar_margin"], 300)
         self.put("sensor.battery", "unavailable")
         self.coordinator._evaluate()
         self.assertIsNone(self.coordinator.data["house_load_power"])

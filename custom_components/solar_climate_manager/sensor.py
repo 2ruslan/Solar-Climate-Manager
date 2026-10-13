@@ -16,6 +16,7 @@ POWER_KEYS = [
     "grid_power",
     "ac_power",
     "solar_margin",
+    "average_solar_margin",
     "forecast_margin",
 ]
 DURATION_KEYS = ["seconds_to_start", "seconds_to_stop"]

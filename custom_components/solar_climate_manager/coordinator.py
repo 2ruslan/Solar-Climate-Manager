@@ -13,6 +13,7 @@ from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_SE
 from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
 from .power import power_watts, read_power, signed_power_watts, soc_percent
+from .settings import configuration_values
 from .strategy import (
     DemoState,
     EnergySnapshot,
@@ -31,10 +32,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, entry):
         super().__init__(hass, LOGGER, name=DOMAIN, config_entry=entry, always_update=False)
         self.entry = entry
-        self.settings = {**DEFAULTS, **entry.data, **entry.options}
-        self.settings = {
-            key: value for key, value in self.settings.items() if key not in REMOVED_SETTINGS
-        }
+        self.settings = configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS)
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.demand = False
         self.signature = None
@@ -257,6 +255,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 "demo_action": strategy.action,
                 "strategy_reason": strategy.reason,
                 "solar_margin": strategy.solar_margin,
+                "average_solar_margin": strategy.average_solar_margin,
                 "forecast_margin": strategy.forecast_margin,
                 "seconds_to_start": round(strategy.seconds_to_start)
                 if strategy.seconds_to_start is not None

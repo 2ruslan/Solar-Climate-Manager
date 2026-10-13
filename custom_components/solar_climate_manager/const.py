@@ -37,7 +37,19 @@ REMOVED_FORECAST_SETTINGS = {
     "forecast_horizon",
 }
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
-REMOVED_SETTINGS = REMOVED_FORECAST_SETTINGS | {"battery_charge_power_entity"} | RETIRED_RULES
+REMOVED_SETTINGS = (
+    REMOVED_FORECAST_SETTINGS
+    | {
+        "battery_charge_power_entity",
+        "critical_soc",
+        "battery_reserve_soc",
+        "charging_reserve_power",
+        "power_reserve",
+        "energy_hysteresis",
+        "adverse_power_delay",
+    }
+    | RETIRED_RULES
+)
 DEFAULTS = {
     **STRATEGY_DEFAULTS,
     "target_temperature": 23.0,
@@ -46,4 +58,5 @@ DEFAULTS = {
     "max_data_age": 900,
     "enabled": True,
     "power_max_data_age": 900,
+    "grid_absence_minutes": 10,
 }

@@ -18,7 +18,7 @@
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
       "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
-      "invalid_soc_thresholds": "Require critical SOC < minimum SOC ≤ reserve SOC.",
+      "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %)."
     },
     "abort": {
@@ -72,11 +72,8 @@
         "title": "Energy",
         "data": {
           "estimated_ac_power": "Conservative estimated AC power (W)",
-          "power_reserve": "Power reserve (W)",
-          "minimum_soc": "Minimum SOC for demo operation (%)",
-          "critical_soc": "Critical SOC: immediate virtual stop (%)",
-          "battery_reserve_soc": "Desired battery reserve SOC (%)",
-          "prioritize_charging": "Prioritize charging below reserve SOC",
+          "minimum_soc": "Minimum SOC: immediate demo stop below (%)",
+          "prioritize_charging": "Preserve current battery charging",
           "allow_grid_import": "Allow limited grid import in demo"
         },
         "description": "Demo only. Other sections and the observation switch state are preserved."
@@ -84,25 +81,13 @@
       "advanced": {
         "title": "Advanced",
         "data": {
-          "max_data_age": "Maximum temperature data age (seconds)",
-          "power_max_data_age": "Maximum PV reading age (seconds)",
-          "energy_hysteresis": "Energy decision hysteresis (W)",
-          "max_battery_discharge": "Maximum tolerated battery discharge (W)",
-          "start_delay": "Continuous surplus confirmation time (seconds)",
-          "shortage_delay": "Continuous energy deficit time (seconds)",
-          "grid_absence_delay": "Continuous grid absence time (seconds)",
-          "minimum_run_time": "Minimum virtual run time (seconds)",
-          "minimum_off_time": "Minimum virtual off time (seconds)",
-          "verification_delay": "Post-start stabilization time (seconds)",
-          "adverse_power_delay": "Import/discharge violation confirmation (seconds)",
-          "grid_max_data_age": "Maximum grid availability report age (seconds)"
+          "grid_absence_minutes": "Grid absence duration (minutes)"
         },
-        "description": "Demo only. Other sections and the observation switch state are preserved."
+        "description": "Other technical settings are fixed: balance is assessed over 10 minutes; short load spikes are tolerated."
       },
       "energy_limits": {
-        "title": "Charging and grid limits",
+        "title": "Grid import limit",
         "data": {
-          "charging_reserve_power": "Minimum charging power budget (W)",
           "max_grid_import": "Maximum grid import (W)"
         },
         "description": "Demo only. Other sections and the observation switch state are preserved."
@@ -113,7 +98,7 @@
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
       "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
-      "invalid_soc_thresholds": "Require critical SOC < minimum SOC ≤ reserve SOC.",
+      "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %)."
     }
   },
@@ -186,10 +171,10 @@
         "name": "Battery SOC"
       },
       "solar_margin": {
-        "name": "Solar budget after AC and reserves"
+        "name": "Solar budget after AC"
       },
       "forecast_margin": {
-        "name": "Forecast budget after AC and reserves"
+        "name": "Forecast budget after AC"
       },
       "seconds_to_start": {
         "name": "Time to possible demo start"
@@ -212,10 +197,8 @@
           "disabled": "Demo disabled",
           "manual_pause": "External change: paused until midnight",
           "outside_schedule": "Outside allowed schedule or schedule unavailable",
-          "critical_soc": "Critical SOC: immediate virtual stop",
           "invalid_energy_data": "Required data missing, stale or invalid",
           "low_soc": "SOC below minimum",
-          "reserve_protection": "Protect battery reserve from discharge",
           "battery_discharge": "Battery discharge exceeds limit",
           "grid_import": "Grid import exceeds limit",
           "outage_deficit": "Both outage and solar deficit timers expired",
@@ -223,7 +206,7 @@
           "minimum_run": "Waiting for minimum run time",
           "insufficient_surplus": "Insufficient actual solar surplus",
           "forecast_insufficient": "Forecast insufficient",
-          "start_confirmation": "Confirming continuous surplus",
+          "start_confirmation": "Collecting 10-minute observation window",
           "minimum_off": "Waiting for minimum off time",
           "solar_ready": "Solar conditions confirmed",
           "grid_ready": "Limited grid import permitted",
@@ -244,6 +227,9 @@
       },
       "battery_charge_power": {
         "name": "Calculated battery charging power"
+      },
+      "average_solar_margin": {
+        "name": "Average solar balance over 10 minutes"
       }
     },
     "binary_sensor": {

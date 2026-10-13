@@ -62,7 +62,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         result = await self.flow.async_step_init()
         self.assertEqual(result["menu_options"], ["sources", "comfort", "energy", "advanced"])
         advanced = await self.flow.async_step_advanced()
-        self.assertIn("verification_delay", advanced["data_schema"].schema)
+        self.assertEqual(set(advanced["data_schema"].schema), {"grid_absence_minutes"})
         energy = await self.flow.async_step_energy()
         self.assertNotIn("verification_delay", energy["data_schema"].schema)
         self.assertNotIn("enabled", energy["data_schema"].schema)
@@ -89,7 +89,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.flow.pending["allow_grid_import"] = True
         self.assertEqual(self.flow.limit_keys(), {"max_grid_import"})
         self.flow.pending["prioritize_charging"] = True
-        self.assertEqual(self.flow.limit_keys(), {"max_grid_import", "charging_reserve_power"})
+        self.assertEqual(self.flow.limit_keys(), {"max_grid_import"})
 
     async def test_source_clear_keeps_schedule_and_comfort(self):
         self.entry.options["schedule_entity"] = "schedule.day"

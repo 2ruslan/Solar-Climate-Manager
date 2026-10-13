@@ -11,6 +11,7 @@ from .settings import (
     ENERGY_KEYS,
     NUMERIC_SETTINGS,
     SOURCE_FLAGS,
+    configuration_values,
     merge_section,
     valid_policy,
 )
@@ -23,8 +24,6 @@ except ImportError:
 MAIN_NUMBERS = {
     "target_temperature": (5, 35, 0.5, "°C"),
     "hysteresis": (0.1, 5, 0.1, "°C"),
-    "max_data_age": (30, 86400, 1, "s"),
-    "power_max_data_age": (30, 86400, 1, "s"),
     **NUMERIC_SETTINGS,
 }
 SOURCE_KEYS = (set(OPTIONAL_SOURCES) - {"schedule_entity"}) | SOURCE_FLAGS
@@ -146,15 +145,9 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
         self.pending = None
 
     def values(self):
-        return {
-            key: value
-            for key, value in {
-                **DEFAULTS,
-                **self.config_entry.data,
-                **self.config_entry.options,
-            }.items()
-            if key not in REMOVED_SETTINGS
-        }
+        return configuration_values(
+            self.config_entry.data, self.config_entry.options, DEFAULTS, REMOVED_SETTINGS
+        )
 
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
@@ -213,8 +206,6 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
         keys = set()
         if self.pending["allow_grid_import"]:
             keys.add("max_grid_import")
-        if self.pending["prioritize_charging"]:
-            keys.add("charging_reserve_power")
         return keys
 
     async def async_step_energy_limits(self, user_input=None):

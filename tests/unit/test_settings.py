@@ -13,6 +13,19 @@ settings = importlib.import_module("scm_settings_test.settings")
 
 
 class SettingsTests(unittest.TestCase):
+    def test_advanced_has_only_minutes_and_hidden_timing_is_fixed(self):
+        self.assertEqual(settings.ADVANCED_KEYS, {"grid_absence_minutes"})
+        defaults = {key: 600 for key in settings.FIXED_POLICY_KEYS}
+        defaults["grid_absence_delay"] = 600
+        result = settings.configuration_values(
+            {"start_delay": 0, "grid_absence_delay": 900, "minimum_soc": 85}, {}, defaults, set()
+        )
+        self.assertEqual(result["start_delay"], 600)
+        self.assertEqual(result["grid_absence_minutes"], 15)
+        self.assertEqual(result["minimum_soc"], 85)
+        result = settings.configuration_values({}, {"grid_absence_minutes": 20}, defaults, set())
+        self.assertEqual(result["grid_absence_delay"], 1200)
+
     def test_comfort_edit_keeps_energy_and_enabled(self):
         result = settings.merge_section(
             {

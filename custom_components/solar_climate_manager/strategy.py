@@ -1,17 +1,14 @@
 """Deterministic demo policy. Virtual transitions only; no device API imports."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field, fields
 from math import isfinite
+
+from .window import BudgetWindow
 
 STRATEGY_DEFAULTS = {
     "estimated_ac_power": 900,
-    "power_reserve": 300,
-    "energy_hysteresis": 150,
     "minimum_soc": 85,
-    "critical_soc": 20,
-    "battery_reserve_soc": 90,
     "prioritize_charging": True,
-    "charging_reserve_power": 500,
     "max_battery_discharge": 100,
     "allow_grid_import": False,
     "max_grid_import": 300,
@@ -21,7 +18,6 @@ STRATEGY_DEFAULTS = {
     "minimum_run_time": 600,
     "minimum_off_time": 600,
     "verification_delay": 180,
-    "adverse_power_delay": 60,
     "grid_max_data_age": 86400,
     "load_includes_ac": True,
     "load_includes_battery_charging": False,
@@ -35,10 +31,8 @@ REASONS = [
     "disabled",
     "manual_pause",
     "outside_schedule",
-    "critical_soc",
     "invalid_energy_data",
     "low_soc",
-    "reserve_protection",
     "battery_discharge",
     "grid_import",
     "outage_deficit",
@@ -79,6 +73,7 @@ class DemoState:
     deficit_since: float | None = None
     grid_absent_since: float | None = None
     adverse_since: float | None = None
+    window: BudgetWindow = field(default_factory=BudgetWindow, repr=False)
 
     def restore(self, data, now):
         """Retain minimum-cycle deadlines; requalify continuity after downtime."""
@@ -125,16 +120,26 @@ class StrategyDecision:
     forecast_margin: float | None
     seconds_to_start: float | None = None
     seconds_to_stop: float | None = None
+    average_solar_margin: float | None = None
 
 
 def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False):
     """Evaluate actual observations against a conservative incremental AC budget."""
     cfg = {**STRATEGY_DEFAULTS, **settings}
     solar_margin = forecast_margin = None
+    average_margin = None
 
     def result(action, reason, allowed=False, start=None, stop=None):
         return StrategyDecision(
-            action, reason, allowed, state.running, solar_margin, forecast_margin, start, stop
+            action,
+            reason,
+            allowed,
+            state.running,
+            solar_margin,
+            forecast_margin,
+            start,
+            stop,
+            average_margin,
         )
 
     def halt(reason):
@@ -143,6 +148,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         if was_running:
             state.last_stop = now
         state.surplus_since = state.deficit_since = state.adverse_since = None
+        state.window.clear()
         return result("would_stop" if was_running else "wait", reason)
 
     if not enabled:
@@ -151,8 +157,13 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         return halt("manual_pause")
     if not snapshot.schedule_allowed:
         return halt("outside_schedule")
-    if snapshot.soc is not None and snapshot.soc <= cfg["critical_soc"]:
-        return halt("critical_soc")
+    if (
+        snapshot.soc is not None
+        and isfinite(snapshot.soc)
+        and 0 <= snapshot.soc <= 100
+        and snapshot.soc < cfg["minimum_soc"]
+    ):
+        return halt("low_soc")
     values = (snapshot.pv, snapshot.load, snapshot.soc, snapshot.battery, snapshot.grid_power)
     if (
         not snapshot.temperature_valid
@@ -163,8 +174,6 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         return halt("invalid_energy_data")
     if not 0 <= snapshot.soc <= 100 or snapshot.pv < 0 or snapshot.load < 0:
         return halt("invalid_energy_data")
-    if snapshot.soc < cfg["minimum_soc"]:
-        return halt("low_soc")
     if snapshot.grid is False:
         if state.grid_absent_since is None:
             state.grid_absent_since = now
@@ -178,37 +187,35 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
     if house_load is None:
         return halt("invalid_energy_data")
     charge_budget = 0
-    if cfg["prioritize_charging"] and snapshot.soc < cfg["battery_reserve_soc"]:
-        charge_budget = max(cfg["charging_reserve_power"], measured_charge)
+    if cfg["prioritize_charging"]:
+        charge_budget = measured_charge
     base_load = (
         max(0, house_load - snapshot.actual_ac_power) if cfg["load_includes_ac"] else house_load
     )
-    required = (
-        base_load
-        + snapshot.other_virtual_power
-        + cfg["estimated_ac_power"]
-        + cfg["power_reserve"]
-        + charge_budget
-    )
+    required = base_load + snapshot.other_virtual_power + cfg["estimated_ac_power"] + charge_budget
     solar_margin = round(snapshot.pv - required, 1)
+    state.window.observe(
+        now,
+        solar_margin + snapshot.other_virtual_power,
+        required - snapshot.other_virtual_power,
+        cfg["start_delay"],
+    )
+    average_margin, average_required, observed = state.window.average(now, cfg["start_delay"])
+    average_margin = round(average_margin - snapshot.other_virtual_power, 1)
     forecasts_valid = all(
         value is not None and isfinite(value) and value >= 0 for value in snapshot.forecasts
     )
     if forecasts_valid:
-        forecast_margin = round(min(snapshot.forecasts) - required, 1)
-    forecast_start = forecasts_valid and forecast_margin >= cfg["energy_hysteresis"]
-    forecast_hold = forecasts_valid and forecast_margin >= -cfg["energy_hysteresis"]
+        forecast_margin = round(
+            min(snapshot.forecasts) - average_required - snapshot.other_virtual_power, 1
+        )
+    forecast_start = forecasts_valid and forecast_margin >= 0
+    forecast_hold = forecast_start
     if not forecasts_valid:
         return halt("invalid_energy_data")
-    if (
-        snapshot.soc < cfg["battery_reserve_soc"]
-        and snapshot.battery > cfg["max_battery_discharge"]
-    ):
-        return halt("reserve_protection")
     grid_limit = cfg["max_grid_import"] if cfg["allow_grid_import"] else 0
     actual_safe = (
-        snapshot.battery <= cfg["max_battery_discharge"]
-        and snapshot.grid_power <= grid_limit
+        snapshot.battery <= cfg["max_battery_discharge"] and snapshot.grid_power <= grid_limit
     )
     additional_draw = (
         max(0, cfg["estimated_ac_power"] - snapshot.actual_ac_power) + snapshot.other_virtual_power
@@ -219,17 +226,40 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         and max(0, snapshot.grid_power + additional_draw) <= cfg["max_grid_import"]
         and actual_safe
     )
-    solar_ready = solar_margin >= cfg["energy_hysteresis"] and forecast_start and actual_safe
+    if not state.running:
+        if not actual_safe and state.adverse_since is None:
+            state.adverse_since = now
+        if actual_safe:
+            state.adverse_since = None
+    limits_ok = (
+        actual_safe
+        or state.adverse_since is None
+        or remaining(now, state.adverse_since, cfg["shortage_delay"]) > 0
+    )
+    solar_ready = average_margin >= 0 and forecast_start and limits_ok
+    if not state.running:
+        if solar_margin < 0 and not grid_ready:
+            if state.deficit_since is None:
+                state.deficit_since = now
+        else:
+            state.deficit_since = None
+        if (
+            state.deficit_since is not None
+            and remaining(now, state.deficit_since, cfg["shortage_delay"]) == 0
+        ):
+            solar_ready = False
     candidate = solar_ready or grid_ready
-    hold = solar_margin >= -cfg["energy_hysteresis"] and forecast_hold or grid_ready
+    hold = solar_margin >= 0 and forecast_hold or grid_ready
 
     if state.running:
         run_left = remaining(now, state.last_start, cfg["minimum_run_time"])
         verification_left = remaining(now, state.last_start, cfg["verification_delay"])
-        if not actual_safe and verification_left == 0:
+        if not actual_safe:
             if state.adverse_since is None:
                 state.adverse_since = now
-            adverse_left = remaining(now, state.adverse_since, cfg["adverse_power_delay"])
+            adverse_left = max(
+                verification_left, remaining(now, state.adverse_since, cfg["shortage_delay"])
+            )
             if adverse_left == 0:
                 return halt(
                     "battery_discharge"
@@ -250,7 +280,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             )
             if outage_left is not None and outage_left == 0 and shortage_left == 0:
                 return halt("outage_deficit")
-            if shortage_left == 0 and run_left == 0:
+            if shortage_left == 0 and run_left == 0 and snapshot.grid is True:
                 return halt("energy_deficit")
         else:
             state.deficit_since = None
@@ -263,7 +293,9 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             value
             for value in (
                 adverse_left,
-                max(shortage_left, run_left) if shortage_left is not None else None,
+                max(shortage_left, run_left)
+                if shortage_left is not None and snapshot.grid is True
+                else None,
                 max(shortage_left, outage_left) if outage_left is not None else None,
             )
             if value is not None
@@ -281,25 +313,19 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             "would_continue", reason, candidate, stop=min(deadlines) if deadlines else None
         )
 
-    state.deficit_since = state.adverse_since = None
     if not demand:
         state.surplus_since = None
         return result("wait", "no_temperature_demand", candidate)
     if not candidate:
         state.surplus_since = None
-        reason = (
-            "insufficient_surplus"
-            if solar_margin < cfg["energy_hysteresis"]
-            else "forecast_insufficient"
-        )
-        if snapshot.battery > cfg["max_battery_discharge"]:
+        reason = "insufficient_surplus" if average_margin < 0 else "forecast_insufficient"
+        if not limits_ok and snapshot.battery > cfg["max_battery_discharge"]:
             reason = "battery_discharge"
-        elif snapshot.grid_power > grid_limit:
+        elif not limits_ok and snapshot.grid_power > grid_limit:
             reason = "grid_import"
         return result("wait", reason)
-    if state.surplus_since is None:
-        state.surplus_since = now
-    confirmation_left = remaining(now, state.surplus_since, cfg["start_delay"])
+    state.surplus_since = None
+    confirmation_left = max(0, cfg["start_delay"] - observed)
     off_left = (
         remaining(now, state.last_stop, cfg["minimum_off_time"])
         if state.last_stop is not None
@@ -315,6 +341,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         )
     state.running = True
     state.last_start = now
+    state.adverse_since = None
     state.surplus_since = None
     return result(
         "would_start",
@@ -324,4 +351,4 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
 
 
 def serialize(state):
-    return asdict(state)
+    return {item.name: getattr(state, item.name) for item in fields(state) if item.name != "window"}

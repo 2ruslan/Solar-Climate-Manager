@@ -31,6 +31,7 @@ class StrategyTests(unittest.TestCase):
             "minimum_run_time": 120,
             "minimum_off_time": 120,
             "verification_delay": 0,
+            "shortage_delay": 60,
         }
 
     def decide(self, now=0, snapshot=None, demand=True, **kwargs):
@@ -49,12 +50,10 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(200).reason, "minimum_off")
         self.assertEqual(self.decide(300).action, "would_start")
 
-    def test_cloud_spike_resets_continuous_confirmation(self):
+    def test_short_peak_does_not_reset_observation_window(self):
         self.decide(0)
-        self.assertFalse(self.decide(50, replace(self.snapshot, pv=500)).energy_allowed)
-        self.assertEqual(self.decide(60).seconds_to_start, 60)
-        self.assertEqual(self.decide(119).action, "wait")
-        self.assertEqual(self.decide(120).action, "would_start")
+        self.assertTrue(self.decide(50, replace(self.snapshot, pv=500)).energy_allowed)
+        self.assertEqual(self.decide(60).action, "would_start")
 
     def test_forecast_alone_cannot_start_by_default(self):
         self.assertEqual(self.decide(0, replace(self.snapshot, pv=500)).action, "wait")
@@ -66,12 +65,12 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(179, low).action, "wait")
         self.assertEqual(self.decide(180, low).action, "wait")
 
-    def test_critical_soc_overrides_minimum_run_and_missing_forecast(self):
+    def test_minimum_soc_overrides_minimum_run_and_missing_forecast(self):
         self.start()
         critical = replace(self.snapshot, soc=20, forecasts=(None, None, None))
         result = self.decide(61, critical)
         self.assertEqual(result.action, "would_stop")
-        self.assertEqual(result.reason, "critical_soc")
+        self.assertEqual(result.reason, "low_soc")
 
     def test_missing_core_data_never_allows_start(self):
         for field in ("pv", "load", "soc", "battery", "grid_power", "grid"):
@@ -91,11 +90,14 @@ class StrategyTests(unittest.TestCase):
         )
 
     def test_excess_discharge_has_correct_wait_reason(self):
+        self.decide(0, replace(self.snapshot, battery=500))
         self.assertEqual(
-            self.decide(0, replace(self.snapshot, battery=500)).reason, "battery_discharge"
+            self.decide(61, replace(self.snapshot, battery=500)).reason, "battery_discharge"
         )
+        self.state = policy.DemoState()
+        self.decide(0, replace(self.snapshot, grid_power=500))
         self.assertEqual(
-            self.decide(0, replace(self.snapshot, grid_power=500)).reason, "grid_import"
+            self.decide(61, replace(self.snapshot, grid_power=500)).reason, "grid_import"
         )
 
     def test_paired_outage_and_deficit_timers(self):
@@ -123,16 +125,18 @@ class StrategyTests(unittest.TestCase):
 
     def test_disabled_grid_import_does_not_use_hidden_limit(self):
         self.cfg.update(allow_grid_import=False, max_grid_import=1500)
-        result = self.decide(0, replace(self.snapshot, grid_power=50))
+        self.decide(0, replace(self.snapshot, grid_power=50))
+        result = self.decide(61, replace(self.snapshot, grid_power=50))
         self.assertFalse(result.energy_allowed)
         self.assertEqual(result.reason, "grid_import")
 
-    def test_charge_priority_and_reserve_protection(self):
-        limited = replace(self.snapshot, pv=2100, soc=88, battery=-500)
+    def test_charge_priority_and_discharge_limit(self):
+        limited = replace(self.snapshot, pv=1900, soc=88, battery=-500)
         self.assertFalse(self.decide(0, limited).energy_allowed)
         self.cfg["prioritize_charging"] = False
         self.assertTrue(self.decide(0, limited).energy_allowed)
-        self.assertEqual(self.decide(0, replace(limited, battery=200)).reason, "reserve_protection")
+        self.decide(0, replace(limited, battery=200))
+        self.assertEqual(self.decide(61, replace(limited, battery=200)).reason, "battery_discharge")
 
     def test_inclusive_load_matches_exclusive_load_without_double_counting(self):
         exclusive = replace(self.snapshot, soc=88, battery=-1000)
@@ -146,16 +150,16 @@ class StrategyTests(unittest.TestCase):
     def test_signed_charge_used_once(self):
         self.cfg["load_includes_battery_charging"] = True
         snapshot = replace(self.snapshot, load=1600, battery=-1000)
-        self.assertEqual(self.decide(0, snapshot).solar_margin, 1000)
+        self.assertEqual(self.decide(0, snapshot).solar_margin, 300)
         self.cfg["prioritize_charging"] = False
         snapshot = replace(snapshot, soc=88)
-        self.assertEqual(self.decide(0, snapshot).solar_margin, 1000)
+        self.assertEqual(self.decide(0, snapshot).solar_margin, 1300)
 
     def test_discharge_not_subtracted_from_load(self):
         self.cfg["load_includes_battery_charging"] = True
         self.assertEqual(policy.house_load_power(600, 0, True), 600)
         snapshot = replace(self.snapshot, battery=50)
-        self.assertEqual(self.decide(0, snapshot).solar_margin, 1000)
+        self.assertEqual(self.decide(0, snapshot).solar_margin, 1300)
 
     def test_charge_greater_than_total_is_invalid(self):
         self.cfg["load_includes_battery_charging"] = True
@@ -175,7 +179,7 @@ class StrategyTests(unittest.TestCase):
     def test_virtual_load_never_subtracted_from_real_house_load(self):
         self.start()
         before = self.decide(61).solar_margin
-        self.assertEqual(before, 1000)
+        self.assertEqual(before, 1300)
         self.assertEqual(self.decide(62).solar_margin, before)
         actual = replace(self.snapshot, load=1500, actual_ac_power=900)
         self.assertEqual(self.decide(63, actual).solar_margin, before)
@@ -211,10 +215,10 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(self.state.running)
         self.assertIsNone(self.state.last_stop)
 
-    def test_energy_hysteresis_keeps_cycle_in_deadband(self):
+    def test_no_hidden_power_buffer_in_budget(self):
         self.start()
         self.assertEqual(
-            self.decide(1000, replace(self.snapshot, pv=1750)).action, "would_continue"
+            self.decide(1000, replace(self.snapshot, pv=1500)).action, "would_continue"
         )
 
     def test_restored_running_cycle_rechecks_data(self):
@@ -223,3 +227,50 @@ class StrategyTests(unittest.TestCase):
         restored.restore(policy.serialize(self.state), 100)
         self.state = restored
         self.assertEqual(self.decide(100, replace(self.snapshot, grid=None)).action, "would_stop")
+
+    def test_fridge_peak_can_coincide_with_start_and_does_not_stop_cycle(self):
+        self.cfg.update(start_delay=600, shortage_delay=600)
+        self.decide(0)
+        peak = replace(self.snapshot, load=4000, grid_power=500, battery=500)
+        self.assertEqual(self.decide(590, peak).action, "wait")
+        result = self.decide(600, peak)
+        self.assertEqual(result.action, "would_start")
+        self.assertLess(result.solar_margin, 0)
+        self.assertGreater(result.average_solar_margin, 0)
+        self.assertEqual(self.decide(610, peak).action, "would_continue")
+        self.assertEqual(self.decide(620).action, "would_continue")
+
+    def test_persistent_overload_prevents_start_and_stops_running(self):
+        self.cfg.update(start_delay=600, shortage_delay=600)
+        peak = replace(self.snapshot, load=4000, grid_power=500, battery=500)
+        self.decide(0, peak)
+        self.assertEqual(self.decide(600, peak).action, "wait")
+        self.state = policy.DemoState()
+        self.decide(0)
+        self.assertEqual(self.decide(600).action, "would_start")
+        self.assertEqual(self.decide(610, peak).action, "would_continue")
+        self.assertEqual(self.decide(1210, peak).action, "would_stop")
+
+    def test_restart_does_not_claim_unobserved_history(self):
+        self.decide(0)
+        saved = policy.serialize(self.state)
+        self.assertNotIn("window", saved)
+        new = policy.DemoState()
+        new.restore(saved, 600)
+        self.state = new
+        self.assertEqual(self.decide(600).seconds_to_start, 60)
+
+    def test_only_minimum_soc_controls_immediate_stop(self):
+        self.cfg.update(critical_soc=99, battery_reserve_soc=100)
+        self.start()
+        self.assertEqual(self.decide(61, replace(self.snapshot, soc=84)).reason, "low_soc")
+
+    def test_longer_outage_setting_is_not_bypassed_by_generic_deficit(self):
+        self.cfg.update(shortage_delay=600, grid_absence_delay=900)
+        self.start()
+        outage = replace(self.snapshot, grid=False, pv=500)
+        self.decide(100, outage)
+        result = self.decide(700, outage)
+        self.assertEqual(result.action, "would_continue")
+        self.assertEqual(result.seconds_to_stop, 300)
+        self.assertEqual(self.decide(1000, outage).reason, "outage_deficit")

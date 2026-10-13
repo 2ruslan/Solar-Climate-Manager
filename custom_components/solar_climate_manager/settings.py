@@ -3,22 +3,9 @@
 # key: min, max, step, unit
 NUMERIC_SETTINGS = {
     "estimated_ac_power": (100, 10000, 50, "W"),
-    "power_reserve": (0, 10000, 50, "W"),
-    "energy_hysteresis": (0, 5000, 50, "W"),
     "minimum_soc": (0, 100, 1, "%"),
-    "critical_soc": (0, 100, 1, "%"),
-    "battery_reserve_soc": (0, 100, 1, "%"),
-    "charging_reserve_power": (0, 10000, 50, "W"),
-    "max_battery_discharge": (0, 10000, 50, "W"),
     "max_grid_import": (0, 20000, 50, "W"),
-    "start_delay": (0, 7200, 30, "s"),
-    "shortage_delay": (0, 7200, 30, "s"),
-    "grid_absence_delay": (0, 7200, 30, "s"),
-    "minimum_run_time": (0, 7200, 30, "s"),
-    "minimum_off_time": (0, 7200, 30, "s"),
-    "verification_delay": (0, 1800, 30, "s"),
-    "adverse_power_delay": (0, 1800, 30, "s"),
-    "grid_max_data_age": (30, 604800, 30, "s"),
+    "grid_absence_minutes": (0, 120, 1, "min"),
 }
 BOOLEAN_SETTINGS = [
     "prioritize_charging",
@@ -28,20 +15,33 @@ BOOLEAN_SETTINGS = [
     "grid_on_means_available",
 ]
 
-ADVANCED_KEYS = {
+ADVANCED_KEYS = {"grid_absence_minutes"}
+FIXED_POLICY_KEYS = {
     "max_data_age",
     "power_max_data_age",
     "grid_max_data_age",
-    "energy_hysteresis",
     "verification_delay",
-    "adverse_power_delay",
     "max_battery_discharge",
     "start_delay",
     "shortage_delay",
-    "grid_absence_delay",
     "minimum_run_time",
     "minimum_off_time",
 }
+
+
+def configuration_values(data, options, defaults, removed):
+    saved = {**data, **options}
+    values = {key: value for key, value in {**defaults, **saved}.items() if key not in removed}
+    for key in FIXED_POLICY_KEYS:
+        values[key] = defaults[key]
+    minutes = saved.get(
+        "grid_absence_minutes", saved.get("grid_absence_delay", defaults["grid_absence_delay"]) / 60
+    )
+    values["grid_absence_minutes"] = minutes
+    values["grid_absence_delay"] = minutes * 60
+    return values
+
+
 COMFORT_KEYS = {
     "temperature_entity",
     "target_temperature",
@@ -51,10 +51,7 @@ COMFORT_KEYS = {
 }
 ENERGY_KEYS = {
     "estimated_ac_power",
-    "power_reserve",
     "minimum_soc",
-    "critical_soc",
-    "battery_reserve_soc",
     "prioritize_charging",
     "allow_grid_import",
 }
@@ -78,4 +75,4 @@ def merge_section(values, updates, *, clear_sources=(), removed=()):
 
 
 def valid_policy(values):
-    return values["critical_soc"] < values["minimum_soc"] <= values["battery_reserve_soc"]
+    return 0 <= values["minimum_soc"] <= 100
