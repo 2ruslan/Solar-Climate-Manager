@@ -4,7 +4,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .const import DEFAULTS, DOMAIN
+from .const import DEFAULTS, DOMAIN, POWER_SOURCES
 
 try:
     import probatio as vol
@@ -49,6 +49,35 @@ def settings_schema(values):
                 )
             ),
             vol.Required("enabled", default=values["enabled"]): selector.BooleanSelector(),
+            vol.Required(
+                "power_max_data_age", default=values["power_max_data_age"]
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=30,
+                    max=86400,
+                    step=1,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                "forecast_max_data_age", default=values["forecast_max_data_age"]
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=30,
+                    max=86400,
+                    step=1,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+        }
+    ).extend(
+        {
+            vol.Optional(key): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            )
+            for key in POWER_SOURCES.values()
         }
     )
 
@@ -65,6 +94,16 @@ def validate(hass, data):
         return "invalid_temperature"
     if temperature.attributes.get("unit_of_measurement") not in ("°C", "°F"):
         return "invalid_temperature"
+    for key in POWER_SOURCES.values():
+        entity_id = data.get(key)
+        if entity_id:
+            state = hass.states.get(entity_id)
+            if (
+                not entity_id.startswith("sensor.")
+                or state is None
+                or state.attributes.get("unit_of_measurement") not in ("W", "kW")
+            ):
+                return "invalid_power"
     return None
 
 
@@ -111,9 +150,17 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
         values = {**DEFAULTS, **self.config_entry.data, **self.config_entry.options}
         errors = {}
         if user_input is not None:
-            error = validate(self.hass, {**values, **user_input})
+            # Missing optional fields explicitly disconnect their sources.
+            merged = {**values, **user_input}
+            for key in POWER_SOURCES.values():
+                merged[key] = user_input.get(key)
+            error = validate(self.hass, merged)
             if error is None:
-                return self.async_create_entry(title="", data=user_input)
+                options = {
+                    **user_input,
+                    **{key: user_input.get(key) for key in POWER_SOURCES.values()},
+                }
+                return self.async_create_entry(title="", data=options)
             errors["base"] = error
         schema = settings_schema(values).extend(
             {
@@ -126,6 +173,11 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
         )
         return self.async_show_form(
             step_id="init",
-            data_schema=self.add_suggested_values_to_schema(schema, user_input or {}),
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                user_input
+                if user_input is not None
+                else {key: value for key, value in values.items() if value is not None},
+            ),
             errors=errors,
         )

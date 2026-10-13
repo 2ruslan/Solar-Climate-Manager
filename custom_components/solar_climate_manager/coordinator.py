@@ -9,8 +9,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULTS, DOMAIN
+from .const import DEFAULTS, DOMAIN, POWER_SOURCES
 from .model import evaluate, is_fresh, temperature_celsius
+from .power import read_power
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.entry.async_on_unload(
             async_track_state_change_event(
                 self.hass,
-                [self.settings["temperature_entity"], self.settings["climate_entity"]],
+                [self.settings["temperature_entity"], self.settings["climate_entity"]]
+                + [self.settings[key] for key in POWER_SOURCES.values() if self.settings.get(key)],
                 self._state_changed,
             )
         )
@@ -109,6 +111,23 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             "automation_mode": "observation" if settings["enabled"] else "disabled",
             "control_allowed": False,
         }
+        now = dt_util.utcnow()
+        for key, source_key in POWER_SOURCES.items():
+            source_id = settings.get(source_key)
+            source = self.hass.states.get(source_id) if source_id else None
+            data[key] = (
+                read_power(
+                    source.state,
+                    source.attributes.get("unit_of_measurement"),
+                    now=now,
+                    reported=source.last_reported,
+                    max_age=settings[
+                        "power_max_data_age" if key == "pv_power" else "forecast_max_data_age"
+                    ],
+                )
+                if source
+                else None
+            )
         if self.data != data:
             if self.data is None or self.data.get("reason") != decision.reason:
                 LOGGER.debug("Entry %s: %s", self.entry.entry_id, decision.reason)

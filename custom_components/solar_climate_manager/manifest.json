@@ -1,11 +1,11 @@
 {
   "domain": "solar_climate_manager",
   "name": "Solar Climate Manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "config_flow": true,
   "integration_type": "helper",
   "iot_class": "calculated",
-  "documentation": "https://developers.home-assistant.io/docs/creating_integration_manifest/",
+  "documentation": "https://github.com/2ruslan/Solar-Climate-Manager#readme",
   "codeowners": [],
   "requirements": []
 }

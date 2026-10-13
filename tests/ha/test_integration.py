@@ -102,3 +102,37 @@ async def test_disabled_persists(hass):
     await hass.async_block_till_done()
     assert entry.runtime_data.data["automation_mode"] == "disabled"
     assert not entry.runtime_data.data["demand"]
+
+
+async def test_solar_sources_independent_of_temperature(hass):
+    states(hass)
+    hass.states.async_set("sensor.pv", "2.8", {"unit_of_measurement": "kW"})
+    entry = MockConfigEntry(domain=DOMAIN, data={**inputs(), "pv_power_entity": "sensor.pv"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["pv_power"] == 2800
+    assert entry.runtime_data.data["forecast_power_now"] is None
+    hass.states.async_set("sensor.pv", "unavailable")
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["pv_power"] is None
+    assert entry.runtime_data.data["demand"]
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**DEFAULTS, "temperature_entity": "sensor.room"}
+    )
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert entry.options["pv_power_entity"] is None
+    assert entry.runtime_data.settings["pv_power_entity"] is None
+
+
+async def test_reject_energy_sensor_as_forecast(hass):
+    states(hass)
+    hass.states.async_set("sensor.energy", "5", {"unit_of_measurement": "kWh"})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+        data={**inputs(), "forecast_power_now_entity": "sensor.energy"},
+    )
+    assert result["errors"]["base"] == "invalid_power"

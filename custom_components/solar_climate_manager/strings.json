@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Solar Climate Manager",
-        "description": "Version 0.1 observes only and never controls the air conditioner.",
+        "description": "Observation only. Solar sources are optional; select power forecasts for the indicated times. No device commands are sent.",
         "data": {
           "climate_entity": "Air conditioner",
           "temperature_entity": "Room temperature sensor",
@@ -11,14 +11,21 @@
           "hysteresis": "Hysteresis (±°C)",
           "hvac_mode": "Thermostat mode",
           "max_data_age": "Maximum temperature data age (seconds)",
-          "enabled": "Enable observation"
+          "enabled": "Enable observation",
+          "pv_power_entity": "Actual PV power sensor",
+          "forecast_power_now_entity": "Forecast power now sensor",
+          "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
+          "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
+          "power_max_data_age": "Maximum PV reading age (seconds)",
+          "forecast_max_data_age": "Maximum forecast sensor report age (seconds)"
         }
       }
     },
     "error": {
       "invalid_climate": "Select an existing climate entity.",
       "unsupported_mode": "The climate entity does not support the selected mode.",
-      "invalid_temperature": "Select a temperature sensor with °C or °F units."
+      "invalid_temperature": "Select a temperature sensor with °C or °F units.",
+      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh)."
     },
     "abort": {
       "already_configured": "This climate entity is already configured."
@@ -34,14 +41,22 @@
           "hysteresis": "Hysteresis (±°C)",
           "hvac_mode": "Thermostat mode",
           "max_data_age": "Maximum temperature data age (seconds)",
-          "enabled": "Enable observation"
-        }
+          "enabled": "Enable observation",
+          "pv_power_entity": "Actual PV power sensor",
+          "forecast_power_now_entity": "Forecast power now sensor",
+          "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
+          "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
+          "power_max_data_age": "Maximum PV reading age (seconds)",
+          "forecast_max_data_age": "Maximum forecast sensor report age (seconds)"
+        },
+        "description": "Observation only. Solar sources are optional; select power forecasts for the indicated times. No device commands are sent."
       }
     },
     "error": {
       "invalid_climate": "Select an existing climate entity.",
       "unsupported_mode": "The climate entity does not support the selected mode.",
-      "invalid_temperature": "Select a temperature sensor with °C or °F units."
+      "invalid_temperature": "Select a temperature sensor with °C or °F units.",
+      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh)."
     }
   },
   "selector": {
@@ -72,6 +87,18 @@
           "observation": "Observation",
           "disabled": "Disabled"
         }
+      },
+      "pv_power": {
+        "name": "Actual PV power"
+      },
+      "forecast_power_now": {
+        "name": "Forecast power now"
+      },
+      "forecast_power_30m": {
+        "name": "Forecast power in 30 minutes"
+      },
+      "forecast_power_60m": {
+        "name": "Forecast power in 1 hour"
       }
     },
     "binary_sensor": {
