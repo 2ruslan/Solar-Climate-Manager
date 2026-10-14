@@ -376,6 +376,22 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.services.async_call.call_args.args[1], "set_hvac_mode")
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
+    async def test_soc_block_survives_settings_reload(self):
+        self.put("binary_sensor.grid", "off")
+        self.put("sensor.soc", "84", unit_of_measurement="%")
+        self.coordinator._evaluate()
+        self.assertTrue(self.coordinator.control.soc_blocked)
+        await self.coordinator.async_shutdown()
+        self.entry.options = {"target_temperature": 24}
+        self.put("sensor.soc", "88", unit_of_measurement="%")
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertEqual(new.data["energy_reason"], "soc_recovery")
+        self.assertTrue(new.data["soc_blocked"])
+        self.put("sensor.soc", "90", unit_of_measurement="%")
+        new._evaluate()
+        self.assertFalse(new.data["soc_blocked"])
+
     async def test_disabled_and_observation_never_send_commands_and_persist(self):
         for mode in ("disabled", "observation"):
             self.put("climate.ac", "heat", hvac_modes=["heat", "cool", "off"], temperature=23)

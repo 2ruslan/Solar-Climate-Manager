@@ -6,7 +6,8 @@ BASE_MODES = OPERATION_MODES[:3]
 # key: min, max, step, unit
 NUMERIC_SETTINGS = {
     "estimated_ac_power": (100, 10000, 50, "W"),
-    "minimum_soc": (0, 100, 1, "%"),
+    "minimum_soc": (0, 99, 1, "%"),
+    "restart_soc": (1, 100, 1, "%"),
     "grid_absence_minutes": (0, 120, 1, "min"),
 }
 BOOLEAN_SETTINGS = [
@@ -37,6 +38,10 @@ def configuration_values(data, options, defaults, removed):
     )
     values["grid_absence_minutes"] = minutes
     values["grid_absence_delay"] = minutes * 60
+    if "restart_soc" not in saved:
+        # Retain the legacy stop threshold and add five percentage points of reserve.
+        values["minimum_soc"] = min(99, saved.get("minimum_soc", defaults.get("minimum_soc", 85)))
+        values["restart_soc"] = min(100, values["minimum_soc"] + 5)
     mode = saved.get("operation_mode", "observation" if saved.get("enabled", True) else "disabled")
     values["operation_mode"] = (
         mode if mode in OPERATION_MODES else "disabled"
@@ -55,6 +60,7 @@ COMFORT_KEYS = {
 ENERGY_KEYS = {
     "estimated_ac_power",
     "minimum_soc",
+    "restart_soc",
 }
 SOURCE_FLAGS = {
     "load_includes_ac",
@@ -76,4 +82,4 @@ def merge_section(values, updates, *, clear_sources=(), removed=()):
 
 
 def valid_policy(values):
-    return 0 <= values["minimum_soc"] <= 100
+    return 0 <= values["minimum_soc"] < values["restart_soc"] <= 100

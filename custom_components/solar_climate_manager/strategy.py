@@ -8,6 +8,7 @@ from .window import BudgetWindow
 STRATEGY_DEFAULTS = {
     "estimated_ac_power": 900,
     "minimum_soc": 85,
+    "restart_soc": 90,
     "max_battery_discharge": 100,
     "start_delay": 600,
     "shortage_delay": 600,
@@ -29,6 +30,7 @@ REASONS = [
     "outside_schedule",
     "invalid_energy_data",
     "low_soc",
+    "soc_recovery",
     "battery_discharge",
     "outage_deficit",
     "no_temperature_demand",
@@ -72,6 +74,7 @@ class ControlState:
     grid_absent_since: float | None = None
     adverse_since: float | None = None
     discharge_blocked: bool = False
+    soc_blocked: bool = False
     window: BudgetWindow = field(default_factory=BudgetWindow, repr=False)
 
     def restore(self, data, now):
@@ -82,6 +85,7 @@ class ControlState:
         self.last_stop = valid_timestamp(data.get("last_stop"), now)
         self.running = data.get("running") is True and self.last_start is not None
         self.discharge_blocked = data.get("discharge_blocked") is True
+        self.soc_blocked = data.get("soc_blocked") is True
 
 
 def valid_timestamp(value, now):
@@ -162,15 +166,22 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             state.window.clear()
         return result("stop" if was_running else "wait", reason)
 
-    if (
+    soc_valid = (
         snapshot.soc is not None
         and isfinite(snapshot.soc)
         and 0 <= snapshot.soc <= 100
-        and snapshot.soc < cfg["minimum_soc"]
-        and snapshot.grid is not True
-    ):
-        energy_reason = "low_soc"
-        return halt("low_soc")
+    )
+    if soc_valid:
+        if snapshot.soc < cfg["minimum_soc"]:
+            state.soc_blocked = True
+        elif snapshot.soc >= cfg["restart_soc"]:
+            state.soc_blocked = False
+        if snapshot.grid is not True and (
+            state.soc_blocked or not state.running and snapshot.soc < cfg["restart_soc"]
+        ):
+            state.soc_blocked = True
+            energy_reason = "low_soc" if snapshot.soc < cfg["minimum_soc"] else "soc_recovery"
+            return halt(energy_reason)
     if (
         snapshot.grid is None
         or any(value is None or not isfinite(value) for value in (snapshot.soc, snapshot.battery))
@@ -181,7 +192,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
 
     if (
         snapshot.grid
-        and snapshot.soc < cfg["minimum_soc"]
+        and state.soc_blocked
         and snapshot.battery > cfg["max_battery_discharge"]
     ):
         energy_reason = "battery_discharge"

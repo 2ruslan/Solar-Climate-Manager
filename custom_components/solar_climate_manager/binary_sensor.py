@@ -46,6 +46,8 @@ class SolarClimateBinarySensor(SolarClimateEntity, BinarySensorEntity):
                 "grid_available": data["grid_available"],
                 "soc": data["soc"],
                 "minimum_soc": self.coordinator.settings["minimum_soc"],
+                "restart_soc": self.coordinator.settings["restart_soc"],
+                "soc_blocked": data["soc_blocked"],
                 "battery_power_w": data["battery_power"],
                 "energy_data_invalid": data["energy_data_invalid"],
                 "grid_import_limit_w": data["grid_import_limit"],

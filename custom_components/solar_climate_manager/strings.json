@@ -18,7 +18,7 @@
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
       "invalid_power": "Select a power source in W or kW (not Wh or kWh).",
-      "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
+      "invalid_soc_thresholds": "Stopping charge must be between 0 and 99%; resuming charge must be higher and at most 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
       "unsupported_temperature": "This climate entity does not support a single target temperature."
@@ -75,7 +75,8 @@
         "title": "Energy",
         "data": {
           "estimated_ac_power": "Conservative estimated AC power (W)",
-          "minimum_soc": "Minimum SOC for off-grid operation (%)"
+          "minimum_soc": "Charge level for stopping (%)",
+          "restart_soc": "Charge level for resuming operation (%)"
         },
         "description": "With grid available, low SOC allows operation if the import budget is sufficient and the battery is not materially discharging. Off-grid, minimum SOC is a hard limit."
       },
@@ -92,7 +93,7 @@
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
       "invalid_power": "Select a power source in W or kW (not Wh or kWh).",
-      "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
+      "invalid_soc_thresholds": "Stopping charge must be between 0 and 99%; resuming charge must be higher and at most 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
       "unsupported_temperature": "This climate entity does not support a single target temperature."
@@ -187,7 +188,7 @@
           "manual_pause": "External change: paused until midnight",
           "outside_schedule": "Outside allowed schedule or schedule unavailable",
           "invalid_energy_data": "Required data missing, stale or invalid",
-          "low_soc": "SOC below minimum",
+          "low_soc": "Charge below stopping threshold",
           "battery_discharge": "Battery discharge exceeds limit",
           "outage_deficit": "Both outage and solar deficit timers expired",
           "no_temperature_demand": "No temperature demand",
@@ -200,7 +201,8 @@
           "running": "Running: monitoring conditions",
           "grid_import_limit": "Grid import limit exceeded or insufficient start headroom",
           "grid_limit_unavailable": "Inverter import limit unavailable or invalid",
-          "grid_power_unavailable": "Grid power measurement unavailable or stale"
+          "grid_power_unavailable": "Grid power measurement unavailable or stale",
+          "soc_recovery": "Waiting for charge recovery"
         }
       },
       "manual_status": {
@@ -236,7 +238,7 @@
           "manual_pause": "External change: paused until midnight",
           "outside_schedule": "Outside allowed schedule or schedule unavailable",
           "invalid_energy_data": "Required data missing, stale or invalid",
-          "low_soc": "SOC below minimum",
+          "low_soc": "Charge below stopping threshold",
           "battery_discharge": "Battery discharge exceeds limit",
           "outage_deficit": "Both outage and solar deficit timers expired",
           "no_temperature_demand": "No temperature demand",
@@ -249,7 +251,8 @@
           "running": "Running: monitoring conditions",
           "grid_import_limit": "Grid import limit exceeded or insufficient start headroom",
           "grid_limit_unavailable": "Inverter import limit unavailable or invalid",
-          "grid_power_unavailable": "Grid power measurement unavailable or stale"
+          "grid_power_unavailable": "Grid power measurement unavailable or stale",
+          "soc_recovery": "Waiting for charge recovery"
         }
       },
       "command_error": {

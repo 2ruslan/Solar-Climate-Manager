@@ -13,6 +13,19 @@ settings = importlib.import_module("scm_settings_test.settings")
 
 
 class SettingsTests(unittest.TestCase):
+    def test_soc_threshold_migration_and_explicit_recovery(self):
+        defaults = {key: 600 for key in settings.FIXED_POLICY_KEYS}
+        defaults.update(grid_absence_delay=600, minimum_soc=85, restart_soc=90)
+        for stop, expected_stop, restart in ((75, 75, 80), (98, 98, 100), (100, 99, 100)):
+            values = settings.configuration_values({"minimum_soc": stop}, {}, defaults, set())
+            self.assertEqual(values["minimum_soc"], expected_stop)
+            self.assertEqual(values["restart_soc"], restart)
+            self.assertTrue(settings.valid_policy(values))
+        values = settings.configuration_values(
+            {"minimum_soc": 75}, {"restart_soc": 95}, defaults, set()
+        )
+        self.assertEqual(values["restart_soc"], 95)
+
     def test_advanced_has_only_minutes_and_hidden_timing_is_fixed(self):
         self.assertEqual(settings.ADVANCED_KEYS, {"grid_absence_minutes"})
         defaults = {key: 600 for key in settings.FIXED_POLICY_KEYS}

@@ -69,7 +69,9 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("allow_forecast_trial", energy["data_schema"].schema)
 
     async def test_edit_preserves_disabled_and_other_sections(self):
-        self.entry.options = {"operation_mode": "disabled", "minimum_soc": 90}
+        self.entry.options = {
+            "operation_mode": "disabled", "minimum_soc": 90, "restart_soc": 95,
+        }
         result = await self.flow.async_step_comfort(
             {
                 "target_temperature": 24,
@@ -81,11 +83,25 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["data"]["operation_mode"], "disabled")
         self.assertEqual(result["data"]["minimum_soc"], 90)
+        self.assertEqual(result["data"]["restart_soc"], 95)
         self.assertEqual(result["data"]["pv_power_entity"], "sensor.pv")
 
     async def test_conditional_limits_only_when_enabled(self):
         form = await self.flow.async_step_energy()
-        self.assertEqual(set(form["data_schema"].schema), {"estimated_ac_power", "minimum_soc"})
+        self.assertEqual(
+            set(form["data_schema"].schema), {"estimated_ac_power", "minimum_soc", "restart_soc"}
+        )
+
+    async def test_energy_rejects_equal_or_reversed_soc_thresholds(self):
+        for restart in (80, 85):
+            result = await self.flow.async_step_energy({
+                "estimated_ac_power": 900, "minimum_soc": 85, "restart_soc": restart,
+            })
+            self.assertEqual(result["errors"]["base"], "invalid_soc_thresholds")
+        result = await self.flow.async_step_energy({
+            "estimated_ac_power": 900, "minimum_soc": 85, "restart_soc": 90,
+        })
+        self.assertEqual(result["type"], "create_entry")
 
     async def test_source_clear_keeps_schedule_and_comfort(self):
         self.entry.options["schedule_entity"] = "schedule.day"

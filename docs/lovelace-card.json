@@ -209,9 +209,17 @@
           "type": "attribute",
           "entity": "binary_sensor.scm_energy_allowed",
           "attribute": "minimum_soc",
-          "name": "Мінімальний SOC без мережі",
+          "name": "Заряд для зупинки",
           "suffix": " %",
           "icon": "mdi:battery-lock"
+        },
+        {
+          "type": "attribute",
+          "entity": "binary_sensor.scm_energy_allowed",
+          "attribute": "restart_soc",
+          "name": "Заряд для відновлення роботи",
+          "suffix": " %",
+          "icon": "mdi:battery-check"
         },
         {
           "type": "attribute",

@@ -77,6 +77,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             self.control.restore(saved.get("control"), dt_util.utcnow().timestamp())
         elif isinstance(saved.get("control"), dict):
             previous = saved.get("control")
+            self.control.soc_blocked = previous.get("soc_blocked") is True
             now = dt_util.utcnow().timestamp()
             self.control.last_stop = (
                 now
@@ -336,6 +337,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             {
                 "grid_available": grid,
                 "energy_allowed": strategy.energy_allowed,
+                "soc_blocked": self.control.soc_blocked,
                 "energy_reason": strategy.energy_reason,
                 "grid_import_margin": strategy.grid_import_margin,
                 "running": actual_running if climate_available else None,

@@ -76,6 +76,59 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(result.reason, "low_soc")
         self.assertFalse(self.state.running)
 
+    def test_soc_hysteresis_stops_immediately_and_waits_for_recovery(self):
+        self.start_solar()
+        self.assertEqual(self.decide(61, replace(self.snapshot, soc=84)).action, "stop")
+        self.assertTrue(self.state.soc_blocked)
+        for now, soc in ((200, 85), (300, 89), (400, 85)):
+            result = self.decide(now, replace(self.snapshot, soc=soc))
+            self.assertEqual(result.reason, "soc_recovery")
+            self.assertFalse(result.energy_allowed)
+        self.assertEqual(
+            self.decide(500, replace(self.snapshot, soc=90)).reason, "start_confirmation"
+        )
+        self.assertEqual(self.decide(560, replace(self.snapshot, soc=90)).action, "start")
+        self.assertEqual(self.decide(561, replace(self.snapshot, soc=85)).action, "continue")
+
+    def test_off_grid_first_start_requires_upper_soc_threshold(self):
+        result = self.decide(0, replace(self.snapshot, soc=89))
+        self.assertEqual(result.reason, "soc_recovery")
+        self.assertTrue(self.state.soc_blocked)
+
+    def test_soc_recovery_keeps_minimum_off_deadline(self):
+        self.state = policy.ControlState(running=True, last_start=0)
+        self.decide(1, replace(self.snapshot, soc=84))
+        self.decide(2, replace(self.snapshot, soc=90))
+        result = self.decide(62, replace(self.snapshot, soc=90))
+        self.assertEqual(result.reason, "minimum_off")
+        self.assertEqual(result.seconds_to_start, 59)
+        self.assertEqual(self.decide(121, replace(self.snapshot, soc=90)).action, "start")
+
+    def test_soc_block_survives_restore_and_missing_measurement(self):
+        self.decide(0, replace(self.snapshot, soc=84))
+        saved = policy.serialize(self.state)
+        self.state = policy.ControlState()
+        self.state.restore(saved, 10)
+        self.decide(10, replace(self.snapshot, soc=None))
+        self.assertTrue(self.state.soc_blocked)
+        self.assertEqual(self.decide(20, replace(self.snapshot, soc=89)).reason, "soc_recovery")
+        self.decide(30, replace(self.snapshot, soc=90))
+        self.assertFalse(self.state.soc_blocked)
+
+    def test_grid_charging_allowed_but_discharge_waits_for_upper_threshold(self):
+        low = replace(self.snapshot, grid=True, soc=84, battery=500)
+        self.assertEqual(self.decide(0, low).reason, "battery_discharge")
+        charging = replace(low, soc=86, battery=-500)
+        self.assertTrue(self.decide(200, charging).energy_allowed)
+        self.assertTrue(self.state.soc_blocked)
+        self.assertEqual(
+            self.decide(201, replace(charging, battery=500)).reason, "battery_discharge"
+        )
+        recovered = replace(charging, soc=90)
+        self.decide(400, recovered)
+        self.assertFalse(self.state.soc_blocked)
+        self.assertEqual(self.decide(401, replace(recovered, battery=500)).action, "continue")
+
     def test_low_soc_allows_grid_heating_and_charging(self):
         grid = replace(
             self.snapshot,
