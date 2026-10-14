@@ -3,13 +3,19 @@ type: "vertical-stack"
 cards:
   - type: "tile"
     entity: "select.scm_operation_mode"
-    name: "Solar Climate Manager"
+    name: "Статус автоматизації"
     icon: "mdi:air-conditioner"
     features_position: "bottom"
     tap_action:
       action: "more-info"
     features:
       - type: "select-options"
+        style: "dropdown"
+        options:
+          - "disabled"
+          - "observation"
+          - "control"
+          - "temporary_block"
   - type: "entities"
     title: "Стан і рішення"
     show_header_toggle: false
@@ -65,12 +71,12 @@ cards:
         name: "Автоматичні команди дозволені"
       - entity: "binary_sensor.scm_demand"
         name: "Є температурна потреба"
-      - entity: "sensor.scm_manual_status"
-        name: "Ручний пріоритет"
+      - entity: "binary_sensor.scm_manual_pause"
+        name: "Тимчасове блокування"
       - type: "section"
         label: "Налаштування"
       - type: "button"
-        name: "Ціль, гістерезис, SOC і джерела"
+        name: "Температура, пороги заряду та джерела"
         icon: "mdi:cog"
         action_name: "Відкрити"
         tap_action:
@@ -91,11 +97,18 @@ cards:
   - type: "conditional"
     conditions:
       - condition: "state"
-        entity: "binary_sensor.scm_manual_pause"
-        state: "on"
+        entity: "select.scm_operation_mode"
+        state: "temporary_block"
     card:
-      type: "markdown"
-      content: "**Ручна пауза до півночі.** Контролер спостерігає за умовами, але не надсилає команд кондиціонеру."
+      type: "vertical-stack"
+      cards:
+        - type: "markdown"
+          content: "**Тимчасове блокування.** Автоматичні команди призупинено. Після місцевої півночі HA повернеться попередній статус. Щоб зняти блокування зараз, виберіть інший статус нижче."
+        - type: "entities"
+          show_header_toggle: false
+          entities:
+            - entity: "select.scm_operation_mode"
+              name: "Змінити статус / розблокувати"
   - type: "conditional"
     conditions:
       - condition: "or"
@@ -117,6 +130,14 @@ cards:
           name: "Проблема енергетичних даних"
         - entity: "sensor.scm_energy_reason"
           name: "Причина енергетичного блокування"
+  - type: "conditional"
+    conditions:
+      - condition: "state"
+        entity: "sensor.scm_energy_reason"
+        state: "soc_recovery"
+    card:
+      type: "markdown"
+      content: "**Очікування відновлення заряду.** Без мережі кондиціонер не запуститься, доки заряд не досягне порога «Заряд для відновлення роботи». Обидва пороги показані в енергетичному балансі. Після відновлення також перевіряються сонячний баланс і мінімальна пауза між запусками."
   - type: "entities"
     title: "Енергетичний баланс"
     show_header_toggle: false
@@ -212,4 +233,4 @@ cards:
       - entity: "binary_sensor.scm_energy_allowed"
         name: "Енергетичний дозвіл"
       - entity: "binary_sensor.scm_manual_pause"
-        name: "Ручна пауза"
+        name: "Тимчасове блокування"

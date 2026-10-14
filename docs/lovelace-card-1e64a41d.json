@@ -4,7 +4,7 @@
     {
       "type": "tile",
       "entity": "select.solar_climate_manager_climate_1e64a41d_operation_mode",
-      "name": "Solar Climate Manager",
+      "name": "Статус автоматизації",
       "icon": "mdi:air-conditioner",
       "features_position": "bottom",
       "tap_action": {
@@ -12,7 +12,14 @@
       },
       "features": [
         {
-          "type": "select-options"
+          "type": "select-options",
+          "style": "dropdown",
+          "options": [
+            "disabled",
+            "observation",
+            "control",
+            "temporary_block"
+          ]
         }
       ]
     },
@@ -103,8 +110,8 @@
           "name": "Є температурна потреба"
         },
         {
-          "entity": "sensor.solar_climate_manager_climate_1e64a41d_manual_priority_status",
-          "name": "Ручний пріоритет"
+          "entity": "binary_sensor.solar_climate_manager_climate_1e64a41d_manual_pause_until_midnight",
+          "name": "Тимчасове блокування"
         },
         {
           "type": "section",
@@ -112,7 +119,7 @@
         },
         {
           "type": "button",
-          "name": "Ціль, гістерезис, SOC і джерела",
+          "name": "Температура, пороги заряду та джерела",
           "icon": "mdi:cog",
           "action_name": "Відкрити",
           "tap_action": {
@@ -148,13 +155,28 @@
       "conditions": [
         {
           "condition": "state",
-          "entity": "binary_sensor.solar_climate_manager_climate_1e64a41d_manual_pause_until_midnight",
-          "state": "on"
+          "entity": "select.solar_climate_manager_climate_1e64a41d_operation_mode",
+          "state": "temporary_block"
         }
       ],
       "card": {
-        "type": "markdown",
-        "content": "**Ручна пауза до півночі.** Контролер спостерігає за умовами, але не надсилає команд кондиціонеру."
+        "type": "vertical-stack",
+        "cards": [
+          {
+            "type": "markdown",
+            "content": "**Тимчасове блокування.** Автоматичні команди призупинено. Після місцевої півночі HA повернеться попередній статус. Щоб зняти блокування зараз, виберіть інший статус нижче."
+          },
+          {
+            "type": "entities",
+            "show_header_toggle": false,
+            "entities": [
+              {
+                "entity": "select.solar_climate_manager_climate_1e64a41d_operation_mode",
+                "name": "Змінити статус / розблокувати"
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -194,6 +216,20 @@
             "name": "Причина енергетичного блокування"
           }
         ]
+      }
+    },
+    {
+      "type": "conditional",
+      "conditions": [
+        {
+          "condition": "state",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_energy_permission_reason",
+          "state": "soc_recovery"
+        }
+      ],
+      "card": {
+        "type": "markdown",
+        "content": "**Очікування відновлення заряду.** Без мережі кондиціонер не запуститься, доки заряд не досягне порога «Заряд для відновлення роботи». Обидва пороги показані в енергетичному балансі. Після відновлення також перевіряються сонячний баланс і мінімальна пауза між запусками."
       }
     },
     {
@@ -381,7 +417,7 @@
         },
         {
           "entity": "binary_sensor.solar_climate_manager_climate_1e64a41d_manual_pause_until_midnight",
-          "name": "Ручна пауза"
+          "name": "Тимчасове блокування"
         }
       ]
     }
