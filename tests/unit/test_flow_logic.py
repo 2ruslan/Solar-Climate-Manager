@@ -125,6 +125,24 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "form")
         self.assertEqual(result["errors"]["base"], "invalid_target")
 
+    async def test_comfort_validates_command_temperature_limits(self):
+        form = await self.flow.async_step_comfort()
+        self.assertIn("ac_min_temperature", form["data_schema"].schema)
+        self.assertIn("ac_max_temperature", form["data_schema"].schema)
+        result = await self.flow.async_step_comfort({
+            "ac_min_temperature": 28, "ac_max_temperature": 27,
+        })
+        self.assertEqual(result["errors"]["base"], "invalid_ac_temperature_limits")
+        self.states["climate.ac"].attributes.update(min_temp=16, max_temp=30)
+        result = await self.flow.async_step_comfort({
+            "ac_min_temperature": 10, "ac_max_temperature": 15,
+        })
+        self.assertEqual(result["errors"]["base"], "invalid_ac_temperature_limits")
+        result = await self.flow.async_step_comfort({
+            "ac_min_temperature": 17, "ac_max_temperature": 28,
+        })
+        self.assertEqual(result["type"], "create_entry")
+
     async def test_unsupported_single_target_rejected_by_form(self):
         self.states["climate.ac"].attributes["supported_features"] = 0
         result = await self.flow.async_step_comfort({"target_temperature": 23})

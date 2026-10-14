@@ -17,6 +17,7 @@ from .climate_control import (
     TARGET_UPDATE_SECONDS,
     acknowledgement_changes,
     compensated_target,
+    compensation_needed,
     matches_acknowledgement,
     normalized_target,
     temperature_matches,
@@ -194,6 +195,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                     climate.attributes,
                     self.hass.config.units.temperature_unit,
                     clamp=True,
+                    bounds_c=(settings["ac_min_temperature"], settings["ac_max_temperature"]),
                 )
                 ac_target = temperature_celsius(
                     command_target, self.hass.config.units.temperature_unit
@@ -207,7 +209,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             mode=settings["hvac_mode"],
             previous_demand=self.demand,
             enabled=settings["operation_mode"] != "disabled",
-            climate_valid=climate_valid and ac_temperature is not None,
+            climate_valid=climate_valid and ac_target is not None,
         )
         if self.demand != decision.demand:
             self.demand = decision.demand
@@ -513,13 +515,38 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                     climate.attributes,
                     self.hass.config.units.temperature_unit,
                     clamp=True,
+                    bounds_c=(
+                        self.settings["ac_min_temperature"], self.settings["ac_max_temperature"],
+                    ),
                 )
             except ValueError as error:
                 self._set_command_error(str(error))
                 return None
             mode = self.settings["hvac_mode"]
-            if climate.state == mode and temperature_matches(
-                climate.attributes.get("temperature"), target
+            current_target = temperature_celsius(
+                climate.attributes.get("temperature"), self.hass.config.units.temperature_unit
+            )
+            current_valid = False
+            if current_target is not None:
+                try:
+                    bounded_current = normalized_target(
+                        current_target, climate.attributes,
+                        self.hass.config.units.temperature_unit, clamp=True,
+                        bounds_c=(
+                            self.settings["ac_min_temperature"],
+                            self.settings["ac_max_temperature"],
+                        ),
+                    )
+                    current_valid = temperature_matches(
+                        climate.attributes.get("temperature"), bounded_current
+                    )
+                except ValueError:
+                    pass
+            if climate.state == mode and (
+                temperature_matches(climate.attributes.get("temperature"), target)
+                or current_valid and self.command_error == "none" and not compensation_needed(
+                    current_target, self.data["ac_temperature"], mode
+                )
             ):
                 self.last_command = None
                 self.unconfirmed_start = False

@@ -96,6 +96,11 @@ def validate(hass, data):
         normalized_target(
             data["target_temperature"], climate.attributes, hass.config.units.temperature_unit
         )
+        normalized_target(
+            data["target_temperature"], climate.attributes,
+            hass.config.units.temperature_unit, clamp=True,
+            bounds_c=(data["ac_min_temperature"], data["ac_max_temperature"]),
+        )
     except ValueError as error:
         return str(error)
     if not valid_policy(data):

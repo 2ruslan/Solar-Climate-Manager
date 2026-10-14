@@ -9,7 +9,9 @@
           "temperature_entity": "Room temperature sensor",
           "target_temperature": "Target temperature (°C)",
           "hysteresis": "Hysteresis (±°C)",
-          "hvac_mode": "Thermostat mode"
+          "hvac_mode": "Thermostat mode",
+          "ac_min_temperature": "Minimum AC command temperature (°C)",
+          "ac_max_temperature": "Maximum AC command temperature (°C)"
         }
       }
     },
@@ -21,7 +23,8 @@
       "invalid_soc_thresholds": "Stopping charge must be between 0 and 99%; resuming charge must be higher and at most 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
-      "unsupported_temperature": "This climate entity does not support a single target temperature."
+      "unsupported_temperature": "This climate entity does not support a single target temperature.",
+      "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device."
     },
     "abort": {
       "already_configured": "This climate entity is already configured."
@@ -67,7 +70,9 @@
           "target_temperature": "Target temperature (°C)",
           "hysteresis": "Hysteresis (±°C)",
           "hvac_mode": "Thermostat mode",
-          "schedule_entity": "Allowed schedule helper (optional)"
+          "schedule_entity": "Allowed schedule helper (optional)",
+          "ac_min_temperature": "Minimum AC command temperature (°C)",
+          "ac_max_temperature": "Maximum AC command temperature (°C)"
         },
         "description": "The target is for the room. The AC target compensates for the difference between its current_temperature and the room sensor. Other settings are preserved."
       },
@@ -96,7 +101,8 @@
       "invalid_soc_thresholds": "Stopping charge must be between 0 and 99%; resuming charge must be higher and at most 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
-      "unsupported_temperature": "This climate entity does not support a single target temperature."
+      "unsupported_temperature": "This climate entity does not support a single target temperature.",
+      "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device."
     }
   },
   "selector": {
@@ -261,7 +267,8 @@
           "none": "No error",
           "service_error": "Command failed or timed out",
           "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
-          "unsupported_temperature": "This climate entity does not support a single target temperature."
+          "unsupported_temperature": "This climate entity does not support a single target temperature.",
+          "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device."
         }
       },
       "ac_temperature": {

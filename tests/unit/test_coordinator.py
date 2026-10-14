@@ -266,7 +266,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["battery_power"], 500)
         clock.current += timedelta(seconds=601)
         self.coordinator._evaluate()
-        self.assertEqual(self.coordinator.data["strategy_reason"], "battery_discharge")
+        self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
         self.states["sensor.soc"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
         self.assertIsNone(self.coordinator.data["soc"])
@@ -677,14 +677,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertFalse(self.coordinator.data["running"])
 
-    async def test_timer_expiring_during_command_is_rechecked_on_completion(self):
-        self.put("sensor.battery", "500", unit_of_measurement="W")
-        self.coordinator._evaluate()
-        self.coordinator.control.adverse_since = clock.current.timestamp() - 595
-
+    async def test_low_soc_outage_during_command_is_rechecked_on_completion(self):
         async def delayed(domain, service, data, **kwargs):
             if service == "set_temperature":
                 clock.current += timedelta(seconds=6)
+                self.put("binary_sensor.grid", "off")
+                self.put("sensor.soc", "40", unit_of_measurement="%")
 
         self.hass.services.async_call.side_effect = delayed
         await self.control_mode()
@@ -692,7 +690,25 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             [call.args[1] for call in self.hass.services.async_call.call_args_list],
             ["set_temperature", "set_hvac_mode"],
         )
-        self.assertEqual(self.coordinator.data["energy_reason"], "battery_discharge")
+        self.assertEqual(self.coordinator.data["energy_reason"], "low_soc")
+
+    async def test_grid_with_98_percent_soc_keeps_running_despite_discharge(self):
+        self.put("sensor.soc", "98", unit_of_measurement="%")
+        self.put("sensor.battery", "500", unit_of_measurement="W")
+        await self.control_mode()
+        self.device_response("heat")
+        if self.coordinator.command_task:
+            await self.coordinator.command_task
+        for minutes in (10, 10):
+            clock.current += timedelta(minutes=minutes)
+            for state in self.states.values():
+                state.last_reported = clock.current
+            self.coordinator._evaluate()
+            if self.coordinator.command_task:
+                await self.coordinator.command_task
+            self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
+            self.assertTrue(self.coordinator.data["running"])
+        self.assertEqual(self.hass.services.async_call.await_count, 1)
 
     async def test_heating_compensates_warmer_ac_sensor(self):
         self.coordinator.settings["target_temperature"] = 22
@@ -736,7 +752,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         clock.current += timedelta(seconds=60)
         self.coordinator._evaluate()
         await self.coordinator.command_task
-        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 28)
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 27)
         self.assertEqual(self.hass.services.async_call.await_count, 2)
         self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
@@ -763,6 +779,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
     async def test_compensated_target_clamps_to_device_range(self):
+        self.coordinator.settings["ac_max_temperature"] = 32
         self.states["climate.ac"].attributes.update(
             current_temperature=35, min_temp=16, max_temp=30
         )
@@ -773,8 +790,72 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_observation_calculates_compensation_without_commands(self):
         self.states["climate.ac"].attributes["current_temperature"] = 25
         self.coordinator._evaluate()
-        self.assertEqual(self.coordinator.data["ac_target_temperature"], 28)
+        self.assertEqual(self.coordinator.data["ac_target_temperature"], 27)
         self.hass.services.async_call.assert_not_called()
+
+    async def test_default_command_limits_apply_to_heat_and_cool(self):
+        self.states["climate.ac"].attributes["current_temperature"] = 35
+        await self.control_mode()
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 27)
+        await self.coordinator.async_set_mode("observation")
+        self.coordinator.settings["hvac_mode"] = "cool"
+        self.put("sensor.room", "30", unit_of_measurement="°C")
+        self.states["climate.ac"].attributes["current_temperature"] = 15
+        clock.current += timedelta(seconds=60)
+        await self.control_mode()
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 15)
+
+    async def test_compensation_keeps_target_until_reserve_is_below_1_1(self):
+        for mode, room, target, ample, boundary, small, expected in (
+            ("heat", "20", 26, 24, 24.9, 25, 27),
+            ("cool", "26", 22, 24, 23.1, 23, 20),
+        ):
+            self.coordinator.settings["hvac_mode"] = mode
+            self.put("sensor.room", room, unit_of_measurement="°C")
+            for current in (ample, boundary):
+                self.put("climate.ac", mode, hvac_modes=["heat", "cool", "off"],
+                         temperature=target, current_temperature=current)
+                self.coordinator._evaluate()
+                self.assertIsNone(self.coordinator._control_command(self.states["climate.ac"]))
+            self.states["climate.ac"].attributes["current_temperature"] = small
+            self.coordinator._evaluate()
+            command = self.coordinator._control_command(self.states["climate.ac"])
+            self.assertEqual(command[1]["temperature"], expected)
+
+    async def test_out_of_bounds_target_is_corrected_even_with_ample_reserve(self):
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"],
+                 temperature=28, current_temperature=24)
+        self.coordinator._evaluate()
+        command = self.coordinator._control_command(self.states["climate.ac"])
+        self.assertEqual(command[1]["temperature"], 27)
+
+    async def test_capped_target_is_not_repeated_when_reserve_is_small(self):
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"],
+                 temperature=27, current_temperature=26)
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["ac_target_temperature"], 27)
+        self.assertIsNone(self.coordinator._control_command(self.states["climate.ac"]))
+
+    async def test_custom_temperature_limits_survive_reload(self):
+        await self.coordinator.async_shutdown()
+        self.entry.options = {"ac_min_temperature": 17, "ac_max_temperature": 25}
+        self.states["climate.ac"].attributes["current_temperature"] = 30
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertEqual(new.settings["ac_min_temperature"], 17)
+        self.assertEqual(new.settings["ac_max_temperature"], 25)
+        self.assertEqual(new.data["ac_target_temperature"], 25)
+
+    async def test_fahrenheit_reserve_is_compared_in_celsius(self):
+        self.hass.config.units.temperature_unit = "°F"
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"],
+                 temperature=78.8, current_temperature=75.2)
+        self.coordinator._evaluate()
+        self.assertIsNone(self.coordinator._control_command(self.states["climate.ac"]))
+        self.states["climate.ac"].attributes["current_temperature"] = 77
+        self.coordinator._evaluate()
+        command = self.coordinator._control_command(self.states["climate.ac"])
+        self.assertEqual(command[1]["temperature"], 80.6)
 
     async def test_limit_metadata_is_read_automatically_and_not_aged(self):
         self.put("number.limit", "2.5", unit_of_measurement="kW")

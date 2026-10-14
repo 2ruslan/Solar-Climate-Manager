@@ -182,13 +182,17 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(10, peak).action, "continue")
         self.assertEqual(self.decide(20, grid).action, "continue")
 
-    def test_grid_sustained_discharge_stops_and_blocks_start(self):
+    def test_grid_sustained_discharge_with_high_soc_does_not_stop(self):
         grid = replace(self.snapshot, grid=True)
         self.decide(0, grid)
         bad = replace(grid, battery=500)
         self.decide(10, bad)
-        self.assertEqual(self.decide(70, bad).reason, "battery_discharge")
-        self.assertEqual(self.decide(71, bad).action, "wait")
+        for now in (70, 610, 1800):
+            result = self.decide(now, bad)
+            self.assertEqual(result.action, "continue")
+            self.assertEqual(result.reason, "grid_ready")
+            self.assertTrue(result.energy_allowed)
+            self.assertIsNone(result.seconds_to_stop)
 
     def test_outage_short_load_peak_does_not_reset_window(self):
         self.decide(0)
@@ -269,18 +273,17 @@ class StrategyTests(unittest.TestCase):
         self.state.restore({"running": True, "last_start": 500}, 100)
         self.assertFalse(self.state.running)
 
-    def test_sustained_discharge_cannot_restart_after_stop_or_restart(self):
-        grid = replace(self.snapshot, grid=True)
-        bad = replace(grid, battery=500)
-        self.decide(0, grid)
-        self.decide(10, bad)
-        self.assertEqual(self.decide(70, bad).reason, "battery_discharge")
-        self.assertEqual(self.decide(1000, bad).action, "wait")
-        saved = policy.serialize(self.state)
-        self.state = policy.ControlState()
-        self.state.restore(saved, 2000)
-        self.assertEqual(self.decide(2000, bad).reason, "battery_discharge")
-        self.assertEqual(self.decide(2001, grid).action, "start")
+    def test_retired_discharge_block_is_ignored_after_upgrade(self):
+        self.state.restore({"discharge_blocked": True, "adverse_since": 0}, 2000)
+        bad = replace(self.snapshot, grid=True, soc=98, battery=500)
+        self.assertEqual(self.decide(2000, bad).action, "start")
+        self.assertEqual(self.decide(4000, bad).action, "continue")
+
+    def test_off_grid_discharge_alone_does_not_override_solar_balance(self):
+        bad = replace(self.snapshot, battery=500)
+        self.decide(0, bad)
+        self.assertEqual(self.decide(60, bad).action, "start")
+        self.assertEqual(self.decide(1800, bad).action, "continue")
 
     def test_grid_permission_is_independent_of_operational_gates(self):
         grid = replace(self.snapshot, grid=True, pv=None, load=None)
@@ -302,8 +305,8 @@ class StrategyTests(unittest.TestCase):
             self.assertTrue(result.energy_allowed)
             self.assertFalse(result.running)
 
-    def test_manual_pause_does_not_reset_discharge_diagnostics(self):
-        grid = replace(self.snapshot, grid=True, battery=500)
+    def test_manual_pause_does_not_bypass_low_soc_discharge_protection(self):
+        grid = replace(self.snapshot, grid=True, soc=84, battery=500)
         self.decide(0, grid, manual=True)
         self.decide(30, grid, manual=True)
         result = self.decide(60, grid, manual=True)

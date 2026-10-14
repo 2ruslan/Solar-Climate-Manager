@@ -72,8 +72,6 @@ class ControlState:
     surplus_since: float | None = None
     deficit_since: float | None = None
     grid_absent_since: float | None = None
-    adverse_since: float | None = None
-    discharge_blocked: bool = False
     soc_blocked: bool = False
     window: BudgetWindow = field(default_factory=BudgetWindow, repr=False)
 
@@ -84,7 +82,6 @@ class ControlState:
         self.last_start = valid_timestamp(data.get("last_start"), now)
         self.last_stop = valid_timestamp(data.get("last_stop"), now)
         self.running = data.get("running") is True and self.last_start is not None
-        self.discharge_blocked = data.get("discharge_blocked") is True
         self.soc_blocked = data.get("soc_blocked") is True
 
 
@@ -130,7 +127,7 @@ class StrategyDecision:
 
 
 def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False):
-    """Comfort from grid; protect reserve during outages and sustained discharge."""
+    """Comfort from grid; protect low battery reserve and outage energy balance."""
     cfg = {**STRATEGY_DEFAULTS, **settings}
     solar_margin = forecast_margin = average_margin = None
     grid_import_margin = None
@@ -159,9 +156,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         if was_running:
             state.last_stop = now
         if reset_energy:
-            state.surplus_since = state.deficit_since = state.adverse_since = None
-        if reason == "battery_discharge":
-            state.discharge_blocked = True
+            state.surplus_since = state.deficit_since = None
         if reset_energy:
             state.window.clear()
         return result("stop" if was_running else "wait", reason)
@@ -253,22 +248,6 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         if not snapshot.grid:
             return halt("invalid_energy_data")
 
-    # Short fridge/compressor spikes are tolerated; persistent actual discharge is not.
-    if snapshot.battery > cfg["max_battery_discharge"]:
-        if state.discharge_blocked:
-            energy_reason = "battery_discharge"
-            return halt("battery_discharge")
-        if state.adverse_since is None:
-            state.adverse_since = now
-        discharge_left = remaining(now, state.adverse_since, cfg["shortage_delay"])
-        if discharge_left == 0:
-            energy_reason = "battery_discharge"
-            return halt("battery_discharge")
-    else:
-        state.adverse_since = None
-        state.discharge_blocked = False
-        discharge_left = None
-
     if snapshot.grid:
         state.deficit_since = None
     elif solar_margin < 0:
@@ -315,13 +294,11 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             return halt("no_temperature_demand", reset_energy=False)
         deadlines = [
             value
-            for value in (discharge_left, outage_deadline, run_left if not demand else None)
+            for value in (outage_deadline, run_left if not demand else None)
             if value is not None
         ]
         reason = (
-            "battery_discharge"
-            if discharge_left is not None
-            else "outage_deficit"
+            "outage_deficit"
             if outage_deadline is not None
             else "minimum_run"
             if not demand

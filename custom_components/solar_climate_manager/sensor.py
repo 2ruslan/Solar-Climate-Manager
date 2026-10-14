@@ -36,7 +36,10 @@ ENUM_OPTIONS = {
     "strategy_action": ACTIONS,
     "strategy_reason": REASONS,
     "energy_reason": REASONS,
-    "command_error": ["none", "service_error", "invalid_target", "unsupported_temperature"],
+    "command_error": [
+        "none", "service_error", "invalid_target", "unsupported_temperature",
+        "invalid_ac_temperature_limits",
+    ],
     "manual_status": ["automatic", "manual_today", "disabled"],
 }
 
@@ -91,6 +94,8 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
                 "temperature_offset_c": self.coordinator.data["temperature_offset"],
                 "ac_target_temperature_c": self.coordinator.data["ac_target_temperature"],
                 "ac_set_temperature_c": self.coordinator.data["ac_set_temperature"],
+                "ac_min_temperature_c": self.coordinator.settings["ac_min_temperature"],
+                "ac_max_temperature_c": self.coordinator.settings["ac_max_temperature"],
                 "estimated_ac_power_w": self.coordinator.settings["estimated_ac_power"],
                 "manual_until_date": self.coordinator.manual_date,
                 "grid_import_limit_w": self.coordinator.data["grid_import_limit"],

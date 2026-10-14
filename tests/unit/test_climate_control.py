@@ -13,6 +13,36 @@ control = importlib.import_module("scm_climate_control_test.climate_control")
 
 
 class ClimateControlTests(unittest.TestCase):
+    def test_compensation_refresh_uses_remaining_device_reserve(self):
+        for mode, target, ample, boundary, small, crossed in (
+            ("heat", 26, 24, 24.9, 25, 27),
+            ("cool", 22, 24, 23.1, 23, 21),
+        ):
+            self.assertFalse(control.compensation_needed(target, ample, mode))
+            self.assertFalse(control.compensation_needed(target, boundary, mode))
+            self.assertTrue(control.compensation_needed(target, small, mode))
+            self.assertTrue(control.compensation_needed(target, crossed, mode))
+        self.assertTrue(control.compensation_needed(None, 23, "heat"))
+
+    def test_configured_bounds_intersect_device_range_and_step(self):
+        limits = (15, 27)
+        self.assertEqual(control.normalized_target(40, {}, "°C", clamp=True, bounds_c=limits), 27)
+        self.assertEqual(control.normalized_target(5, {}, "°C", clamp=True, bounds_c=limits), 15)
+        attrs = {"min_temp": 16, "max_temp": 30, "target_temp_step": 1}
+        self.assertEqual(control.normalized_target(5, attrs, "°C", clamp=True, bounds_c=limits), 16)
+        attrs = {"min_temp": 10, "max_temp": 35, "target_temp_step": 3}
+        self.assertEqual(control.normalized_target(5, attrs, "°C", clamp=True, bounds_c=limits), 16)
+        self.assertEqual(control.normalized_target(40, attrs, "°C", clamp=True, bounds_c=limits), 25)
+        self.assertEqual(control.normalized_target(40, {}, "°F", clamp=True, bounds_c=limits), 80.6)
+        self.assertEqual(control.normalized_target(5, {}, "°F", clamp=True, bounds_c=limits), 59)
+        for bounds in ((28, 27), (float("nan"), 27), (None, 27)):
+            with self.assertRaisesRegex(ValueError, "invalid_ac_temperature_limits"):
+                control.normalized_target(23, {}, "°C", clamp=True, bounds_c=bounds)
+        for attrs in ({"min_temp": 28}, {"max_temp": 14}, {
+            "min_temp": 10, "target_temp_step": 3,
+        }):
+            with self.assertRaisesRegex(ValueError, "invalid_ac_temperature_limits"):
+                control.normalized_target(23, attrs, "°C", clamp=True, bounds_c=(15, 15))
     def test_device_step_and_temperature_bounds(self):
         attrs = {"min_temp": 16, "max_temp": 30, "target_temp_step": 1}
         self.assertEqual(control.normalized_target(23.5, attrs, "°C"), 24)

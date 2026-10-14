@@ -78,6 +78,22 @@
           "icon": "mdi:thermometer"
         },
         {
+          "type": "attribute",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_strategy_decision",
+          "attribute": "ac_min_temperature_c",
+          "name": "Мінімальна ціль кондиціонера",
+          "suffix": " °C",
+          "icon": "mdi:thermometer"
+        },
+        {
+          "type": "attribute",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_strategy_decision",
+          "attribute": "ac_max_temperature_c",
+          "name": "Максимальна ціль кондиціонера",
+          "suffix": " °C",
+          "icon": "mdi:thermometer"
+        },
+        {
           "entity": "sensor.solar_climate_manager_climate_1e64a41d_strategy_decision",
           "name": "Рішення контролера"
         },
