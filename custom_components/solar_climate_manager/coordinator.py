@@ -64,9 +64,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             self.demand = saved.get("demand") is True
         self.manual_date = saved.get("manual_date")
         if saved.get("policy_signature") == self.policy_signature:
-            self.control.restore(
-                saved.get("control"), dt_util.utcnow().timestamp()
-            )
+            self.control.restore(saved.get("control"), dt_util.utcnow().timestamp())
         elif isinstance(saved.get("control"), dict):
             previous = saved.get("control")
             now = dt_util.utcnow().timestamp()
@@ -158,9 +156,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             if state
             else None
         )
-        fresh = state is not None and is_fresh(
-            dt_util.utcnow(), state.last_reported, settings["max_data_age"]
-        )
         climate_valid = (
             climate is not None
             and climate.state not in ("unknown", "unavailable")
@@ -172,14 +167,13 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             hysteresis=settings["hysteresis"],
             mode=settings["hvac_mode"],
             previous_demand=self.demand,
-            fresh=fresh,
             enabled=settings["operation_mode"] != "disabled",
             climate_valid=climate_valid,
         )
         if self.demand != decision.demand:
             self.demand = decision.demand
         data = {
-            "temperature": temperature if fresh else None,
+            "temperature": temperature,
             "demand": decision.demand,
             "invalid_data": not decision.data_valid,
             "reason": decision.reason,

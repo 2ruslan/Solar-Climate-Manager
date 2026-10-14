@@ -40,6 +40,7 @@ PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 REMOVED_SETTINGS = (
     REMOVED_FORECAST_SETTINGS
     | {
+        "max_data_age",
         "battery_charge_power_entity",
         "critical_soc",
         "battery_reserve_soc",
@@ -59,7 +60,6 @@ DEFAULTS = {
     "target_temperature": 23.0,
     "hysteresis": 1.0,
     "hvac_mode": "heat",
-    "max_data_age": 900,
     "operation_mode": "observation",
     "power_max_data_age": 900,
     "grid_absence_minutes": 10,

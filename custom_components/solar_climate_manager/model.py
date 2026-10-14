@@ -34,7 +34,6 @@ def evaluate(
     hysteresis: float,
     mode: str,
     previous_demand: bool,
-    fresh: bool,
     enabled: bool = True,
     climate_valid: bool = True,
 ) -> Decision:
@@ -46,7 +45,7 @@ def evaluate(
         or hysteresis <= 0
     ):
         raise ValueError("Invalid thermostat configuration")
-    if temperature is None or not isfinite(temperature) or not fresh or not climate_valid:
+    if temperature is None or not isfinite(temperature) or not climate_valid:
         return Decision(False, False, "invalid_data")
     if not enabled:
         return Decision(False, True, "disabled")

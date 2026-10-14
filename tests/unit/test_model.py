@@ -23,7 +23,6 @@ class ThermostatTests(unittest.TestCase):
                 "hysteresis": 1,
                 "mode": "heat",
                 "previous_demand": False,
-                "fresh": True,
                 **kwargs,
             },
         )
@@ -60,7 +59,7 @@ class ThermostatTests(unittest.TestCase):
     def test_invalid_data_clears_demand(self):
         for temperature in [None, float("nan"), float("inf")]:
             self.assertEqual(self.decide(temperature, previous_demand=True).reason, "invalid_data")
-        for options in [{"fresh": False}, {"climate_valid": False}]:
+        for options in [{"climate_valid": False}]:
             decision = self.decide(21, previous_demand=True, **options)
             self.assertFalse(decision.demand)
             self.assertFalse(decision.data_valid)

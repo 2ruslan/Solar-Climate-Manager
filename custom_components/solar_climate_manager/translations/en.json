@@ -125,7 +125,7 @@
       "reason": {
         "name": "Decision reason",
         "state": {
-          "invalid_data": "Unavailable or stale data",
+          "invalid_data": "Temperature or climate data unavailable or invalid",
           "disabled": "Automation disabled",
           "temperature_demand": "Temperature demand",
           "temperature_satisfied": "Temperature satisfied"
@@ -259,7 +259,7 @@
         "name": "Heating or cooling demand"
       },
       "invalid_data": {
-        "name": "Unavailable or stale data"
+        "name": "Temperature or climate data unavailable or invalid"
       },
       "control_allowed": {
         "name": "Real control allowed"

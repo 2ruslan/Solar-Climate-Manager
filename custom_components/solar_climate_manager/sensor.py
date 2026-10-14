@@ -67,7 +67,7 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
 
     @property
     def available(self):
-        if self.key in POWER_KEYS or self.key == "soc":
+        if self.key in POWER_KEYS or self.key in ("soc", "temperature"):
             return super().available and self.coordinator.data.get(self.key) is not None
         return super().available
 

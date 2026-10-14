@@ -3,7 +3,7 @@
   "cards": [
     {
       "type": "tile",
-      "entity": "select.scm_operation_mode",
+      "entity": "select.solar_climate_manager_climate_1e64a41d_operation_mode",
       "name": "Solar Climate Manager",
       "icon": "mdi:air-conditioner",
       "features_position": "bottom",
@@ -23,7 +23,7 @@
       "state_color": true,
       "entities": [
         {
-          "entity": "binary_sensor.scm_running",
+          "entity": "binary_sensor.solar_climate_manager_climate_1e64a41d_air_conditioner_on",
           "name": "Кондиціонер увімкнено"
         },
         {
@@ -32,14 +32,14 @@
         },
         {
           "type": "attribute",
-          "entity": "sensor.scm_strategy_action",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_strategy_decision",
           "attribute": "target_temperature_c",
           "name": "Ціль контролера",
           "suffix": " °C",
           "icon": "mdi:thermometer-check"
         },
         {
-          "entity": "sensor.scm_strategy_action",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_strategy_decision",
           "name": "Рішення контролера"
         },
         {
@@ -59,7 +59,7 @@
           "name": "Енергетичний дозвіл"
         },
         {
-          "entity": "sensor.scm_energy_reason",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_energy_permission_reason",
           "name": "Причина енергетичного дозволу"
         },
         {
@@ -95,7 +95,7 @@
       "conditions": [
         {
           "condition": "state",
-          "entity": "binary_sensor.scm_command_failed",
+          "entity": "binary_sensor.solar_climate_manager_climate_1e64a41d_climate_control_error",
           "state": "on"
         }
       ],
@@ -105,7 +105,7 @@
         "show_header_toggle": false,
         "entities": [
           {
-            "entity": "sensor.scm_command_error",
+            "entity": "sensor.solar_climate_manager_climate_1e64a41d_air_conditioner_command_error",
             "name": "Причина помилки"
           }
         ]
@@ -158,7 +158,7 @@
             "name": "Проблема енергетичних даних"
           },
           {
-            "entity": "sensor.scm_energy_reason",
+            "entity": "sensor.solar_climate_manager_climate_1e64a41d_energy_permission_reason",
             "name": "Причина енергетичного блокування"
           }
         ]
@@ -211,11 +211,34 @@
         },
         {
           "type": "attribute",
-          "entity": "sensor.scm_strategy_action",
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_strategy_decision",
           "attribute": "estimated_ac_power_w",
           "name": "Оцінка потужності кондиціонера",
           "suffix": " W",
           "icon": "mdi:flash"
+        }
+      ]
+    },
+    {
+      "type": "entities",
+      "title": "Сонце: прогноз",
+      "show_header_toggle": false,
+      "entities": [
+        {
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_forecast_power_now",
+          "name": "Прогноз зараз"
+        },
+        {
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_forecast_power_in_30_minutes",
+          "name": "Прогноз через 30 хв"
+        },
+        {
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_forecast_power_in_1_hour",
+          "name": "Прогноз через годину"
+        },
+        {
+          "entity": "sensor.solar_climate_manager_climate_1e64a41d_forecast_budget_after_ac_and_reserves",
+          "name": "Прогнозний баланс"
         }
       ]
     },
@@ -285,7 +308,7 @@
       "hours_to_show": 12,
       "entities": [
         {
-          "entity": "binary_sensor.scm_running",
+          "entity": "binary_sensor.solar_climate_manager_climate_1e64a41d_air_conditioner_on",
           "name": "Кондиціонер"
         },
         {

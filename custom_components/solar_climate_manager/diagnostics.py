@@ -4,7 +4,7 @@
 async def async_get_config_entry_diagnostics(hass, entry):
     coordinator = entry.runtime_data
     return {
-        "version": "0.3.2",
+        "version": "0.3.3",
         "settings": {
             key: value for key, value in coordinator.settings.items() if not key.endswith("_entity")
         },

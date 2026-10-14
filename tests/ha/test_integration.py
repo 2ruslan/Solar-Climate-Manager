@@ -103,14 +103,16 @@ async def test_reload_restores_hysteresis_and_options_reset(hass):
     assert not entry.runtime_data.data["demand"]
 
 
-async def test_stale_reading(hass):
+async def test_unchanged_temperature_does_not_expire(hass):
     entry = await setup(hass)
     with patch(
         "custom_components.solar_climate_manager.coordinator.dt_util.utcnow",
-        return_value=dt_util.utcnow() + timedelta(seconds=901),
+        return_value=dt_util.utcnow() + timedelta(days=2),
     ):
         entry.runtime_data._evaluate()
-    assert entry.runtime_data.data["invalid_data"]
+    assert not entry.runtime_data.data["invalid_data"]
+    assert entry.runtime_data.data["temperature"] == 21
+    assert entry.runtime_data.data["demand"]
 
 
 async def test_disabled_persists(hass):
