@@ -19,6 +19,13 @@ POWER_KEYS = [
     "average_solar_margin",
     "forecast_margin",
 ]
+TEMPERATURE_KEYS = [
+    "temperature",
+    "ac_temperature",
+    "temperature_offset",
+    "ac_target_temperature",
+    "ac_set_temperature",
+]
 DURATION_KEYS = ["seconds_to_start", "seconds_to_stop"]
 ENUM_OPTIONS = {
     "automation_mode": ["disabled", "observation", "control"],
@@ -35,7 +42,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(
         [
             SolarClimateSensor(entry.runtime_data, key)
-            for key in ("temperature", *ENUM_OPTIONS, *POWER_KEYS, *DURATION_KEYS, "soc")
+            for key in (*TEMPERATURE_KEYS, *ENUM_OPTIONS, *POWER_KEYS, *DURATION_KEYS, "soc")
         ]
     )
 
@@ -43,8 +50,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class SolarClimateSensor(SolarClimateEntity, SensorEntity):
     def __init__(self, coordinator, key):
         super().__init__(coordinator, key)
-        if key == "temperature":
-            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+        if key in TEMPERATURE_KEYS:
+            if key != "temperature_offset":
+                self._attr_device_class = SensorDeviceClass.TEMPERATURE
             self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         elif key in POWER_KEYS:
             self._attr_device_class = SensorDeviceClass.POWER
@@ -67,7 +75,7 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
 
     @property
     def available(self):
-        if self.key in POWER_KEYS or self.key in ("soc", "temperature"):
+        if self.key in POWER_KEYS or self.key in TEMPERATURE_KEYS or self.key == "soc":
             return super().available and self.coordinator.data.get(self.key) is not None
         return super().available
 
@@ -76,6 +84,10 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
         if self.key == "strategy_action":
             return {
                 "target_temperature_c": self.coordinator.settings["target_temperature"],
+                "ac_temperature_c": self.coordinator.data["ac_temperature"],
+                "temperature_offset_c": self.coordinator.data["temperature_offset"],
+                "ac_target_temperature_c": self.coordinator.data["ac_target_temperature"],
+                "ac_set_temperature_c": self.coordinator.data["ac_set_temperature"],
                 "estimated_ac_power_w": self.coordinator.settings["estimated_ac_power"],
                 "manual_until_date": self.coordinator.manual_date,
             }

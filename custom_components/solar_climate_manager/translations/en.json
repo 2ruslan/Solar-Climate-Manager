@@ -68,7 +68,7 @@
           "hvac_mode": "Thermostat mode",
           "schedule_entity": "Allowed schedule helper (optional)"
         },
-        "description": "Other settings and the operation mode are preserved."
+        "description": "The target is for the room. The AC target compensates for the difference between its current_temperature and the room sensor. Other settings are preserved."
       },
       "energy": {
         "title": "Energy",
@@ -252,6 +252,18 @@
           "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
           "unsupported_temperature": "This climate entity does not support a single target temperature."
         }
+      },
+      "ac_temperature": {
+        "name": "Air conditioner sensor temperature"
+      },
+      "temperature_offset": {
+        "name": "AC minus room temperature"
+      },
+      "ac_target_temperature": {
+        "name": "Calculated AC target temperature"
+      },
+      "ac_set_temperature": {
+        "name": "Reported AC target temperature"
       }
     },
     "binary_sensor": {

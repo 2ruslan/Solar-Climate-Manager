@@ -6,6 +6,7 @@ from .manual import CONTROL_ATTRIBUTES
 
 ACKNOWLEDGEMENT_SECONDS = 30
 COMMAND_TIMEOUT_SECONDS = 10
+TARGET_UPDATE_SECONDS = 60
 
 
 def number(value):
@@ -23,7 +24,7 @@ def temperature_matches(actual, target):
     return value is not None and isclose(value, target, abs_tol=0.05, rel_tol=0)
 
 
-def normalized_target(target_c, attributes, unit):
+def normalized_target(target_c, attributes, unit, *, clamp=False):
     """Climate state bounds and service temperatures use HA's display unit."""
     target_c = number(target_c)
     if target_c is None:
@@ -34,7 +35,12 @@ def normalized_target(target_c, attributes, unit):
     target = target_c * 9 / 5 + 32 if unit == "°F" else target_c
     minimum = number(attributes.get("min_temp"))
     maximum = number(attributes.get("max_temp"))
-    if (minimum is not None and target < minimum) or (maximum is not None and target > maximum):
+    if clamp:
+        if minimum is not None:
+            target = max(minimum, target)
+        if maximum is not None:
+            target = min(maximum, target)
+    elif (minimum is not None and target < minimum) or (maximum is not None and target > maximum):
         raise ValueError("invalid_target")
     step = number(attributes.get("target_temp_step"))
     if step is not None and step > 0:
@@ -68,3 +74,12 @@ def matches_acknowledgement(changes, expected):
         )
         for key, value in changes.items()
     )
+
+
+def compensated_target(room_target, room_temperature, ac_temperature):
+    """Preserve the room's temperature error at the device's own thermostat."""
+    readings = tuple(number(value) for value in (room_target, room_temperature, ac_temperature))
+    if any(value is None for value in readings):
+        return None
+    target, room, ac = readings
+    return target + ac - room

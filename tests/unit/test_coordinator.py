@@ -133,6 +133,8 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await self.coordinator.async_initialize()
 
     def put(self, entity, state, **attributes):
+        if entity.startswith("climate."):
+            attributes.setdefault("current_temperature", 20)
         self.states[entity] = SimpleNamespace(
             state=state, attributes=attributes, last_reported=clock.current
         )
@@ -306,6 +308,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_control_temperature_in_fahrenheit(self):
         self.hass.config.units.temperature_unit = "°F"
+        self.states["climate.ac"].attributes["current_temperature"] = 68
         await self.control_mode()
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 73.4)
 
@@ -584,3 +587,84 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             ["set_temperature", "set_hvac_mode"],
         )
         self.assertEqual(self.coordinator.data["energy_reason"], "battery_discharge")
+
+    async def test_heating_compensates_warmer_ac_sensor(self):
+        self.coordinator.settings["target_temperature"] = 22
+        self.states["climate.ac"].attributes.update(
+            current_temperature=25, min_temp=16, max_temp=30, target_temp_step=1
+        )
+        await self.control_mode()
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 27)
+        self.assertEqual(self.coordinator.data["ac_temperature"], 25)
+        self.assertEqual(self.coordinator.data["temperature_offset"], 5)
+        self.assertEqual(self.coordinator.data["ac_target_temperature"], 27)
+        self.assertEqual(self.coordinator.settings["target_temperature"], 22)
+
+    async def test_cooling_compensation_uses_same_sensor_difference(self):
+        self.coordinator.settings["hvac_mode"] = "cool"
+        self.coordinator.settings["target_temperature"] = 22
+        self.put("sensor.room", "26", unit_of_measurement="°C")
+        self.states["climate.ac"].attributes.update(
+            current_temperature=29, min_temp=16, max_temp=30, target_temp_step=1
+        )
+        await self.control_mode()
+        self.assertEqual(
+            self.hass.services.async_call.call_args.args[2],
+            {
+                "entity_id": "climate.ac",
+                "hvac_mode": "cool",
+                "temperature": 25,
+            },
+        )
+
+    async def test_temperature_correction_is_limited_but_stop_is_immediate(self):
+        await self.control_mode()
+        self.device_response("heat")
+        if self.coordinator.command_task:
+            await self.coordinator.command_task
+        self.device_response("heat", current_temperature=25)
+        if self.coordinator.command_task:
+            await self.coordinator.command_task
+        self.assertFalse(self.coordinator.data["manual_pause"])
+        self.assertEqual(self.hass.services.async_call.await_count, 1)
+        clock.current += timedelta(seconds=60)
+        self.coordinator._evaluate()
+        await self.coordinator.command_task
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 28)
+        self.assertEqual(self.hass.services.async_call.await_count, 2)
+        self.put("sensor.soc", "40", unit_of_measurement="%")
+        self.coordinator._evaluate()
+        await self.coordinator.command_task
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+        self.assertEqual(self.hass.services.async_call.await_count, 3)
+
+    async def test_missing_ac_temperature_blocks_start_and_stops_running_unit(self):
+        self.states["climate.ac"].attributes["current_temperature"] = None
+        await self.control_mode()
+        self.hass.services.async_call.assert_not_called()
+        self.assertTrue(self.coordinator.data["invalid_data"])
+        self.assertIsNone(self.coordinator.data["ac_target_temperature"])
+        self.put(
+            "climate.ac",
+            "heat",
+            hvac_modes=["heat", "cool", "off"],
+            temperature=23,
+            current_temperature=None,
+        )
+        self.coordinator._evaluate()
+        await self.coordinator.command_task
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+
+    async def test_compensated_target_clamps_to_device_range(self):
+        self.states["climate.ac"].attributes.update(
+            current_temperature=35, min_temp=16, max_temp=30
+        )
+        await self.control_mode()
+        self.assertEqual(self.coordinator.data["ac_target_temperature"], 30)
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 30)
+
+    async def test_observation_calculates_compensation_without_commands(self):
+        self.states["climate.ac"].attributes["current_temperature"] = 25
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["ac_target_temperature"], 28)
+        self.hass.services.async_call.assert_not_called()

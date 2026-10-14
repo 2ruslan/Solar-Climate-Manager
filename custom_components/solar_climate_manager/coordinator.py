@@ -14,7 +14,9 @@ from homeassistant.util import dt as dt_util
 from .climate_control import (
     ACKNOWLEDGEMENT_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
+    TARGET_UPDATE_SECONDS,
     acknowledgement_changes,
+    compensated_target,
     matches_acknowledgement,
     normalized_target,
     temperature_matches,
@@ -54,6 +56,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.command_error = "none"
         self.closed = False
         self.last_command = None
+        self.last_target_update = None
         self.manual_date = None
         self.policy_signature = dict(self.settings)
 
@@ -161,6 +164,29 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             and climate.state not in ("unknown", "unavailable")
             and settings["hvac_mode"] in climate.attributes.get("hvac_modes", [])
         )
+        ac_temperature = (
+            temperature_celsius(
+                climate.attributes.get("current_temperature"),
+                climate.attributes.get("temperature_unit", self.hass.config.units.temperature_unit),
+            )
+            if climate_valid
+            else None
+        )
+        raw_target = compensated_target(settings["target_temperature"], temperature, ac_temperature)
+        ac_target = None
+        if raw_target is not None:
+            try:
+                command_target = normalized_target(
+                    raw_target,
+                    climate.attributes,
+                    self.hass.config.units.temperature_unit,
+                    clamp=True,
+                )
+                ac_target = temperature_celsius(
+                    command_target, self.hass.config.units.temperature_unit
+                )
+            except ValueError:
+                pass
         decision = evaluate(
             temperature,
             target=settings["target_temperature"],
@@ -168,12 +194,23 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             mode=settings["hvac_mode"],
             previous_demand=self.demand,
             enabled=settings["operation_mode"] != "disabled",
-            climate_valid=climate_valid,
+            climate_valid=climate_valid and ac_temperature is not None,
         )
         if self.demand != decision.demand:
             self.demand = decision.demand
         data = {
             "temperature": temperature,
+            "ac_temperature": ac_temperature,
+            "ac_set_temperature": temperature_celsius(
+                climate.attributes.get("temperature"),
+                climate.attributes.get("temperature_unit", self.hass.config.units.temperature_unit),
+            )
+            if climate_valid
+            else None,
+            "temperature_offset": (ac_temperature - temperature)
+            if ac_temperature is not None and temperature is not None
+            else None,
+            "ac_target_temperature": ac_target,
             "demand": decision.demand,
             "invalid_data": not decision.data_valid,
             "reason": decision.reason,
@@ -410,10 +447,20 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
     def _control_command(self, climate):
         if self.desired_running:
             try:
-                target = normalized_target(
+                normalized_target(
                     self.settings["target_temperature"],
                     climate.attributes,
                     self.hass.config.units.temperature_unit,
+                )
+                target = normalized_target(
+                    compensated_target(
+                        self.settings["target_temperature"],
+                        self.data["temperature"],
+                        self.data["ac_temperature"],
+                    ),
+                    climate.attributes,
+                    self.hass.config.units.temperature_unit,
+                    clamp=True,
                 )
             except ValueError as error:
                 self._set_command_error(str(error))
@@ -457,6 +504,13 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                     and now - self.last_command[1] < 30
                 ):
                     return
+                if (
+                    service == "set_temperature"
+                    and self.command_error == "none"
+                    and self.last_target_update is not None
+                    and now - self.last_target_update < TARGET_UPDATE_SECONDS
+                ):
+                    return
                 self._prune_acknowledgements()
                 context = Context()
                 expires = now + ACKNOWLEDGEMENT_SECONDS
@@ -470,6 +524,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 self.expected_updates.append({"expires": expires, "remaining": remaining})
                 self.last_command = (key, now)
                 if service == "set_temperature":
+                    self.last_target_update = now
                     self.unconfirmed_start = True
                 try:
                     async with asyncio.timeout(COMMAND_TIMEOUT_SECONDS):

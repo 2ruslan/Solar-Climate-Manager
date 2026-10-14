@@ -24,7 +24,9 @@ def basic_inputs():
 
 
 def states(hass, temperature="21"):
-    hass.states.async_set("climate.test", "off", {"hvac_modes": ["off", "heat", "cool"]})
+    hass.states.async_set(
+        "climate.test", "off", {"hvac_modes": ["off", "heat", "cool"], "current_temperature": 21}
+    )
     hass.states.async_set(
         "sensor.room", temperature, {"device_class": "temperature", "unit_of_measurement": "°C"}
     )
@@ -217,4 +219,40 @@ async def test_grid_energy_permission_survives_disabled_mode(hass):
     for key, expected in (("energy_reason", "grid_ready"), ("command_error", "none")):
         entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}")
         assert hass.states.get(entity_id).state == expected
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_ac_temperature_and_compensated_target_sensors(hass):
+    from homeassistant.helpers import entity_registry as er
+
+    states(hass)
+    hass.states.async_set(
+        "climate.test",
+        "off",
+        {
+            "hvac_modes": ["off", "heat", "cool"],
+            "current_temperature": 28,
+            "temperature": 29,
+            "min_temp": 16,
+            "max_temp": 30,
+            "target_temp_step": 1,
+        },
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data=inputs(), unique_id="climate.test")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    for key, expected in (
+        ("ac_temperature", 28),
+        ("temperature_offset", 7),
+        ("ac_target_temperature", 30),
+        ("ac_set_temperature", 29),
+    ):
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}")
+        assert float(hass.states.get(entity_id).state) == expected
+    decision_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_strategy_action"
+    )
+    assert hass.states.get(decision_id).attributes["ac_target_temperature_c"] == 30
     assert await hass.config_entries.async_unload(entry.entry_id)

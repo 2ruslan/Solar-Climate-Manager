@@ -48,3 +48,17 @@ class ClimateControlTests(unittest.TestCase):
         for value in (None, True, float("nan"), float("inf"), "unknown"):
             with self.assertRaisesRegex(ValueError, "invalid_target"):
                 control.normalized_target(value, {}, "°C")
+
+    def test_compensation_matches_room_error_for_both_modes(self):
+        self.assertEqual(control.compensated_target(22, 20, 25), 27)
+        self.assertEqual(control.compensated_target(22, 26, 29), 25)
+        self.assertEqual(control.compensated_target(22, 20, 18), 20)
+        for missing in (None, float("nan"), "unknown"):
+            self.assertIsNone(control.compensated_target(22, 20, missing))
+
+    def test_compensation_limits_and_fahrenheit_rounding(self):
+        attrs = {"min_temp": 16, "max_temp": 30, "target_temp_step": 1}
+        self.assertEqual(control.normalized_target(40, attrs, "°C", clamp=True), 30)
+        self.assertEqual(control.normalized_target(5, attrs, "°C", clamp=True), 16)
+        attrs = {"min_temp": 60, "max_temp": 86, "target_temp_step": 1}
+        self.assertEqual(control.normalized_target(27, attrs, "°F", clamp=True), 81)
