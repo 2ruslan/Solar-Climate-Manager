@@ -113,3 +113,24 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.states["climate.ac"].attributes["supported_features"] = 0
         result = await self.flow.async_step_comfort({"target_temperature": 23})
         self.assertEqual(result["errors"]["base"], "unsupported_temperature")
+
+    async def test_limit_source_uses_number_and_power_units(self):
+        self.put("number.limit", "3", unit_of_measurement="kW")
+        values = {**self.entry.data, "grid_import_limit_entity": "number.limit"}
+        self.assertIsNone(flow_module.validate(self.hass, values))
+        self.put("number.limit", "3", unit_of_measurement="kWh")
+        self.assertEqual(flow_module.validate(self.hass, values), "invalid_power")
+        self.put("sensor.limit", "3000", unit_of_measurement="W")
+        self.assertEqual(
+            flow_module.validate(self.hass, {**values, "grid_import_limit_entity": "sensor.limit"}),
+            "invalid_energy_source",
+        )
+        schema = flow_module.settings_schema(self.flow.values(), flow_module.SOURCE_KEYS)
+        self.assertIn("grid_import_limit_entity", schema.schema)
+
+    async def test_limit_source_can_be_cleared_without_changing_comfort(self):
+        self.entry.options["grid_import_limit_entity"] = "number.limit"
+        result = await self.flow.async_step_sources({})
+        self.assertEqual(result["type"], "create_entry")
+        self.assertIsNone(result["data"]["grid_import_limit_entity"])
+        self.assertEqual(result["data"]["target_temperature"], 23)

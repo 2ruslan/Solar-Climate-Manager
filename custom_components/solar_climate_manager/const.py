@@ -16,6 +16,7 @@ ENERGY_SOURCES = {
     "load_power": "load_power_entity",
     "battery_power": "battery_power_entity",
     "grid_power": "grid_power_entity",
+    "grid_import_limit": "grid_import_limit_entity",
     "soc": "soc_entity",
     "grid_available": "grid_available_entity",
     "ac_power": "ac_power_entity",

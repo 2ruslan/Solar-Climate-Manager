@@ -256,3 +256,38 @@ async def test_ac_temperature_and_compensated_target_sensors(hass):
     )
     assert hass.states.get(decision_id).attributes["ac_target_temperature_c"] == 30
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_inverter_limit_and_low_soc_charging(hass):
+    states(hass)
+    hass.states.async_set("binary_sensor.grid", "on")
+    hass.states.async_set("sensor.soc", "60", {"unit_of_measurement": "%"})
+    hass.states.async_set("sensor.battery", "-1200", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.grid", "2000", {"unit_of_measurement": "W"})
+    hass.states.async_set("number.limit", "3", {"unit_of_measurement": "kW"})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **inputs(),
+            "grid_available_entity": "binary_sensor.grid",
+            "soc_entity": "sensor.soc",
+            "battery_power_entity": "sensor.battery",
+            "grid_power_entity": "sensor.grid",
+            "grid_import_limit_entity": "number.limit",
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["energy_allowed"]
+    assert entry.runtime_data.data["grid_import_limit"] == 3000
+    assert entry.runtime_data.data["grid_import_margin"] == 100
+    hass.states.async_set("number.limit", "2", {"unit_of_measurement": "kW"})
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["energy_reason"] == "grid_import_limit"
+    assert not entry.runtime_data.data["energy_allowed"]
+    hass.states.async_set("number.limit", "0", {"unit_of_measurement": "kW"})
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["energy_allowed"]
+    assert not entry.runtime_data.data["grid_import_limit_active"]
+    assert await hass.config_entries.async_unload(entry.entry_id)

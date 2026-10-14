@@ -17,7 +17,7 @@
       "invalid_climate": "Select an existing climate entity.",
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
-      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
+      "invalid_power": "Select a power source in W or kW (not Wh or kWh).",
       "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
@@ -55,9 +55,10 @@
           "grid_on_means_available": "Grid binary sensor ON means available",
           "battery_positive": "Positive battery power means",
           "grid_positive": "Positive grid power means",
-          "load_includes_battery_charging": "Total consumption includes battery charging"
+          "load_includes_battery_charging": "Total consumption includes battery charging",
+          "grid_import_limit_entity": "Inverter grid import limit (number, optional; 0 = unlimited)"
         },
-        "description": "Other settings and the operation mode are preserved."
+        "description": "Other settings and operation mode are preserved. The optional number import limit uses its W/kW unit automatically. A positive limit also requires an actual grid import/export power sensor."
       },
       "comfort": {
         "title": "Comfort",
@@ -74,9 +75,9 @@
         "title": "Energy",
         "data": {
           "estimated_ac_power": "Conservative estimated AC power (W)",
-          "minimum_soc": "Minimum SOC: immediate stop below (%)"
+          "minimum_soc": "Minimum SOC for off-grid operation (%)"
         },
-        "description": "Other settings and the operation mode are preserved."
+        "description": "With grid available, low SOC allows operation if the import budget is sufficient and the battery is not materially discharging. Off-grid, minimum SOC is a hard limit."
       },
       "advanced": {
         "title": "Advanced",
@@ -90,7 +91,7 @@
       "invalid_climate": "Select an existing climate entity.",
       "unsupported_mode": "The climate entity does not support the selected mode.",
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
-      "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
+      "invalid_power": "Select a power source in W or kW (not Wh or kWh).",
       "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
@@ -195,7 +196,10 @@
           "minimum_off": "Waiting for minimum off time",
           "solar_ready": "Solar conditions confirmed",
           "grid_ready": "Grid available: temperature control allowed",
-          "running": "Running: monitoring conditions"
+          "running": "Running: monitoring conditions",
+          "grid_import_limit": "Grid import limit exceeded or insufficient start headroom",
+          "grid_limit_unavailable": "Inverter import limit unavailable or invalid",
+          "grid_power_unavailable": "Grid power measurement unavailable or stale"
         }
       },
       "manual_status": {
@@ -241,7 +245,10 @@
           "minimum_off": "Waiting for minimum off time",
           "solar_ready": "Solar conditions confirmed",
           "grid_ready": "Grid available: energy conditions allow operation",
-          "running": "Running: monitoring conditions"
+          "running": "Running: monitoring conditions",
+          "grid_import_limit": "Grid import limit exceeded or insufficient start headroom",
+          "grid_limit_unavailable": "Inverter import limit unavailable or invalid",
+          "grid_power_unavailable": "Grid power measurement unavailable or stale"
         }
       },
       "command_error": {
@@ -264,6 +271,12 @@
       },
       "ac_set_temperature": {
         "name": "Reported AC target temperature"
+      },
+      "grid_import_limit": {
+        "name": "Inverter grid import limit"
+      },
+      "grid_import_margin": {
+        "name": "Grid import headroom"
       }
     },
     "binary_sensor": {
@@ -293,6 +306,9 @@
       },
       "command_failed": {
         "name": "Climate control error"
+      },
+      "grid_import_limit_active": {
+        "name": "Grid import limit configured"
       }
     },
     "select": {

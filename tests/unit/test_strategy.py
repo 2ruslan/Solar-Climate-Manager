@@ -70,13 +70,34 @@ class StrategyTests(unittest.TestCase):
         self.decide(0, no_forecast)
         self.assertEqual(self.decide(60, no_forecast).action, "start")
 
-    def test_low_soc_immediate_on_grid_and_off_grid(self):
-        for grid in (True, False):
-            self.state = policy.ControlState(running=True, last_start=0)
-            self.assertEqual(
-                self.decide(1, replace(self.snapshot, grid=grid, soc=84)).reason, "low_soc"
-            )
-            self.assertFalse(self.state.running)
+    def test_low_soc_immediate_off_grid(self):
+        self.state = policy.ControlState(running=True, last_start=0)
+        result = self.decide(1, replace(self.snapshot, grid=False, soc=84))
+        self.assertEqual(result.reason, "low_soc")
+        self.assertFalse(self.state.running)
+
+    def test_low_soc_allows_grid_heating_and_charging(self):
+        grid = replace(
+            self.snapshot,
+            grid=True,
+            soc=70,
+            battery=-1000,
+            grid_power=1800,
+            grid_import_limit=3000,
+            grid_limit_configured=True,
+        )
+        result = self.decide(0, grid)
+        self.assertTrue(result.energy_allowed)
+        self.assertEqual(result.action, "start")
+        self.assertEqual(result.grid_import_margin, 300)
+        self.assertEqual(self.decide(60, grid).action, "continue")
+
+    def test_low_soc_blocks_battery_assisted_heating_even_with_grid(self):
+        grid = replace(self.snapshot, grid=True, soc=70, battery=500)
+        self.state = policy.ControlState(running=True, last_start=0)
+        result = self.decide(1, grid)
+        self.assertEqual(result.action, "stop")
+        self.assertEqual(result.energy_reason, "battery_discharge")
 
     def test_missing_battery_soc_grid_or_temperature_blocks(self):
         for field in ("soc", "battery", "grid"):
@@ -241,3 +262,73 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(result.energy_allowed)
         result = self.decide(0, replace(self.snapshot, grid=True, ac_power_valid=False))
         self.assertTrue(result.energy_allowed)
+
+    def test_grid_limit_reserves_ac_start_without_discarding_charging_load(self):
+        grid = replace(
+            self.snapshot,
+            grid=True,
+            grid_power=2500,
+            battery=-1500,
+            grid_import_limit=3000,
+            grid_limit_configured=True,
+        )
+        result = self.decide(0, grid)
+        self.assertEqual(result.action, "wait")
+        self.assertFalse(result.energy_allowed)
+        self.assertEqual(result.energy_reason, "grid_import_limit")
+        self.assertEqual(result.grid_import_margin, -400)
+
+    def test_running_ac_is_not_added_to_grid_power_twice(self):
+        self.state = policy.ControlState(running=True, last_start=0)
+        grid = replace(
+            self.snapshot,
+            grid=True,
+            grid_power=2800,
+            grid_import_limit=3000,
+            grid_limit_configured=True,
+        )
+        result = self.decide(1, grid)
+        self.assertEqual(result.action, "continue")
+        self.assertEqual(result.grid_import_margin, 200)
+        result = self.decide(2, replace(grid, grid_power=3100))
+        self.assertEqual(result.action, "stop")
+        self.assertEqual(result.energy_reason, "grid_import_limit")
+
+    def test_grid_export_contributes_to_start_headroom(self):
+        grid = replace(
+            self.snapshot,
+            grid=True,
+            grid_power=-500,
+            grid_import_limit=400,
+            grid_limit_configured=True,
+        )
+        result = self.decide(0, grid)
+        self.assertEqual(result.action, "start")
+        self.assertEqual(result.grid_import_margin, 0)
+
+    def test_zero_and_unconfigured_limits_are_unlimited(self):
+        for enabled in (False, True):
+            self.state = policy.ControlState()
+            grid = replace(
+                self.snapshot,
+                grid=True,
+                grid_power=None,
+                grid_import_limit=0,
+                grid_limit_configured=enabled,
+            )
+            self.assertEqual(self.decide(0, grid).action, "start")
+
+    def test_missing_limit_or_grid_measurement_blocks_only_on_grid(self):
+        grid = replace(
+            self.snapshot,
+            grid=True,
+            grid_power=0,
+            grid_import_limit=None,
+            grid_limit_configured=True,
+        )
+        self.assertEqual(self.decide(0, grid).energy_reason, "grid_limit_unavailable")
+        self.assertEqual(
+            self.decide(0, replace(grid, grid_import_limit=3000, grid_power=None)).energy_reason,
+            "grid_power_unavailable",
+        )
+        self.assertEqual(self.decide(0, replace(grid, grid=False)).reason, "start_confirmation")

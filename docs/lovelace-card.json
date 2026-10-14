@@ -209,9 +209,29 @@
           "type": "attribute",
           "entity": "binary_sensor.scm_energy_allowed",
           "attribute": "minimum_soc",
-          "name": "Мінімальний SOC",
+          "name": "Мінімальний SOC без мережі",
           "suffix": " %",
           "icon": "mdi:battery-lock"
+        },
+        {
+          "type": "attribute",
+          "entity": "binary_sensor.scm_energy_allowed",
+          "attribute": "grid_import_limit_w",
+          "name": "Ліміт імпорту (0 — без обмежень)",
+          "suffix": " W"
+        },
+        {
+          "type": "attribute",
+          "entity": "binary_sensor.scm_energy_allowed",
+          "attribute": "grid_import_margin_w",
+          "name": "Запас за лімітом імпорту",
+          "suffix": " W"
+        },
+        {
+          "type": "attribute",
+          "entity": "binary_sensor.scm_energy_allowed",
+          "attribute": "grid_import_limit_active",
+          "name": "Ліміт імпорту задано"
         },
         {
           "entity": "sensor.scm_pv_power",

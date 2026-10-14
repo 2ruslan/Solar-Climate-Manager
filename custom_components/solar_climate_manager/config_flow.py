@@ -46,7 +46,9 @@ def settings_schema(values, keys):
             )
         elif key in OPTIONAL_SOURCES or key in ("temperature_entity", "climate_entity"):
             domain = (
-                "binary_sensor"
+                "number"
+                if key == "grid_import_limit_entity"
+                else "binary_sensor"
                 if key == "grid_available_entity"
                 else "schedule"
                 if key == "schedule_entity"
@@ -104,13 +106,15 @@ def validate(hass, data):
             continue
         state = hass.states.get(entity_id)
         domain = (
-            "binary_sensor"
+            "number"
+            if key == "grid_import_limit_entity"
+            else "binary_sensor"
             if key == "grid_available_entity"
             else "schedule"
             if key == "schedule_entity"
             else "sensor"
         )
-        unit = "%" if key == "soc_entity" else None if domain != "sensor" else "power"
+        unit = "%" if key == "soc_entity" else "power" if domain in ("sensor", "number") else None
         if state is None or not entity_id.startswith(f"{domain}."):
             return "invalid_energy_source"
         if unit == "power" and state.attributes.get("unit_of_measurement") not in ("W", "kW"):

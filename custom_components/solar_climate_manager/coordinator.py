@@ -257,6 +257,16 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         data["house_load_power"] = house_load_power(
             data["load_power"], measured_charge, settings["load_includes_battery_charging"]
         )
+        limit_id = settings.get("grid_import_limit_entity")
+        limit_state = self.hass.states.get(limit_id) if limit_id else None
+        # This is a setting, not a periodically reported measurement.
+        data["grid_import_limit"] = (
+            power_watts(limit_state.state, limit_state.attributes.get("unit_of_measurement"))
+            if limit_state
+            else None
+        )
+        limit_active = bool(limit_id) and data["grid_import_limit"] != 0
+        data["grid_import_limit_active"] = limit_active
         grid = self._binary_value("grid_available_entity", now, settings["grid_max_data_age"])
         if grid is not None and not settings["grid_on_means_available"]:
             grid = not grid
@@ -283,6 +293,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             soc=data["soc"],
             battery=data["battery_power"],
             grid_power=data["grid_power"],
+            grid_import_limit=data["grid_import_limit"],
+            grid_limit_configured=limit_active,
             grid=grid,
             forecasts=forecasts,
             actual_ac_power=actual_ac,
@@ -313,6 +325,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 "grid_available": grid,
                 "energy_allowed": strategy.energy_allowed,
                 "energy_reason": strategy.energy_reason,
+                "grid_import_margin": strategy.grid_import_margin,
                 "running": actual_running if climate_available else None,
                 "strategy_action": strategy.action,
                 "strategy_reason": strategy.reason,
@@ -331,7 +344,12 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 else "manual_today"
                 if manual
                 else "automatic",
-                "energy_data_invalid": any(
+                "energy_data_invalid": (
+                    grid is True
+                    and limit_active
+                    and (data["grid_import_limit"] is None or data["grid_power"] is None)
+                )
+                or any(
                     value is None
                     for value in (
                         data["soc"],

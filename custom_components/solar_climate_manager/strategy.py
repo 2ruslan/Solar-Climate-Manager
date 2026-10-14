@@ -38,6 +38,9 @@ REASONS = [
     "minimum_off",
     "solar_ready",
     "grid_ready",
+    "grid_import_limit",
+    "grid_limit_unavailable",
+    "grid_power_unavailable",
     "running",
 ]
 
@@ -49,6 +52,8 @@ class EnergySnapshot:
     soc: float | None = None
     battery: float | None = None  # positive = discharge
     grid_power: float | None = None  # positive = import
+    grid_import_limit: float | None = None
+    grid_limit_configured: bool = False
     grid: bool | None = None
     forecasts: tuple = (None, None, None)
     actual_ac_power: float = 0  # actual measured or estimated draw
@@ -117,12 +122,14 @@ class StrategyDecision:
     seconds_to_stop: float | None = None
     average_solar_margin: float | None = None
     energy_reason: str = "invalid_energy_data"
+    grid_import_margin: float | None = None
 
 
 def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False):
     """Comfort from grid; protect reserve during outages and sustained discharge."""
     cfg = {**STRATEGY_DEFAULTS, **settings}
     solar_margin = forecast_margin = average_margin = None
+    grid_import_margin = None
     observed = 0
     energy_allowed = False
     energy_reason = "invalid_energy_data"
@@ -139,6 +146,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
             stop,
             average_margin,
             energy_reason,
+            grid_import_margin,
         )
 
     def halt(reason, *, reset_energy=True):
@@ -159,6 +167,7 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
         and isfinite(snapshot.soc)
         and 0 <= snapshot.soc <= 100
         and snapshot.soc < cfg["minimum_soc"]
+        and snapshot.grid is not True
     ):
         energy_reason = "low_soc"
         return halt("low_soc")
@@ -169,6 +178,30 @@ def decide(snapshot, state, settings, *, now, demand, enabled=True, manual=False
     ):
         state.grid_absent_since = None
         return halt("invalid_energy_data")
+
+    if (
+        snapshot.grid
+        and snapshot.soc < cfg["minimum_soc"]
+        and snapshot.battery > cfg["max_battery_discharge"]
+    ):
+        energy_reason = "battery_discharge"
+        return halt(energy_reason)
+
+    if snapshot.grid and snapshot.grid_limit_configured and snapshot.grid_import_limit != 0:
+        limit = snapshot.grid_import_limit
+        if limit is None or not isfinite(limit) or limit < 0:
+            energy_reason = "grid_limit_unavailable"
+            return halt(energy_reason)
+        if snapshot.grid_power is None or not isfinite(snapshot.grid_power):
+            energy_reason = "grid_power_unavailable"
+            return halt(energy_reason)
+        # Grid metering already includes a running AC. Reserve its estimated
+        # additional draw only before a start; signed export contributes headroom.
+        projected = snapshot.grid_power + (0 if state.running else cfg["estimated_ac_power"])
+        grid_import_margin = round(limit - projected, 1)
+        if grid_import_margin < 0:
+            energy_reason = "grid_import_limit"
+            return halt(energy_reason)
 
     if snapshot.grid:
         state.grid_absent_since = None

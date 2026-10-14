@@ -283,6 +283,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.own_update()
         if self.coordinator.command_task:
             await self.coordinator.command_task
+        self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
         await self.coordinator.command_task
@@ -514,6 +515,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             if report_start:
                 self.device_response("heat")
+            self.put("binary_sensor.grid", "off")
             self.put("sensor.soc", "40", unit_of_measurement="%")
             self.coordinator._evaluate()
             release.set()
@@ -549,9 +551,10 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_grid_energy_permission_still_protects_battery(self):
         self.put("sensor.soc", "40", unit_of_measurement="%")
+        self.put("sensor.battery", "500", unit_of_measurement="W")
         self.coordinator._evaluate()
         self.assertFalse(self.coordinator.data["energy_allowed"])
-        self.assertEqual(self.coordinator.data["energy_reason"], "low_soc")
+        self.assertEqual(self.coordinator.data["energy_reason"], "battery_discharge")
         self.put("sensor.soc", "unavailable")
         self.coordinator._evaluate()
         self.assertFalse(self.coordinator.data["energy_allowed"])
@@ -562,6 +565,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.device_response("heat")
         if self.coordinator.command_task:
             await self.coordinator.command_task
+        self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
         await self.coordinator.command_task
@@ -632,6 +636,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await self.coordinator.command_task
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 28)
         self.assertEqual(self.hass.services.async_call.await_count, 2)
+        self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
         await self.coordinator.command_task
@@ -668,3 +673,64 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["ac_target_temperature"], 28)
         self.hass.services.async_call.assert_not_called()
+
+    async def test_limit_metadata_is_read_automatically_and_not_aged(self):
+        self.put("number.limit", "2.5", unit_of_measurement="kW")
+        self.states["number.limit"].last_reported = clock.current - timedelta(days=3)
+        self.coordinator.settings["grid_import_limit_entity"] = "number.limit"
+        self.put("sensor.grid", "1800", unit_of_measurement="W")
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["grid_import_limit"], 2500)
+        self.assertEqual(self.coordinator.data["grid_import_margin"], -200)
+        self.assertFalse(self.coordinator.data["energy_allowed"])
+        self.assertEqual(self.coordinator.data["energy_reason"], "grid_import_limit")
+        self.put("number.limit", "3000", unit_of_measurement="W")
+        self.coordinator._evaluate()
+        self.assertTrue(self.coordinator.data["energy_allowed"])
+        self.assertEqual(self.coordinator.data["grid_import_margin"], 300)
+
+    async def test_zero_limit_is_unlimited_without_grid_power_meter(self):
+        self.put("number.limit", "0", unit_of_measurement="W")
+        self.coordinator.settings["grid_import_limit_entity"] = "number.limit"
+        self.coordinator.settings["grid_power_entity"] = None
+        self.coordinator._evaluate()
+        self.assertFalse(self.coordinator.data["grid_import_limit_active"])
+        self.assertTrue(self.coordinator.data["energy_allowed"])
+
+    async def test_low_soc_grid_charging_starts_if_limit_has_capacity(self):
+        self.put("number.limit", "3000", unit_of_measurement="W")
+        self.coordinator.settings["grid_import_limit_entity"] = "number.limit"
+        self.put("sensor.grid", "1800", unit_of_measurement="W")
+        self.put("sensor.soc", "60", unit_of_measurement="%")
+        self.put("sensor.battery", "-1000", unit_of_measurement="W")
+        await self.control_mode()
+        self.assertTrue(self.coordinator.data["energy_allowed"])
+        self.assertEqual(self.coordinator.data["grid_import_margin"], 300)
+        self.assertEqual(self.hass.services.async_call.call_args.args[1], "set_temperature")
+
+    async def test_limit_change_stops_running_ac_without_waiting_for_minimum_run(self):
+        self.put("number.limit", "3000", unit_of_measurement="W")
+        self.coordinator.settings["grid_import_limit_entity"] = "number.limit"
+        self.put("sensor.grid", "1800", unit_of_measurement="W")
+        await self.control_mode()
+        self.device_response("heat")
+        if self.coordinator.command_task:
+            await self.coordinator.command_task
+        self.put("number.limit", "1000", unit_of_measurement="W")
+        self.coordinator._state_changed(SimpleNamespace(data={"entity_id": "number.limit"}))
+        await self.coordinator.command_task
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+        self.assertEqual(self.coordinator.data["energy_reason"], "grid_import_limit")
+
+    async def test_invalid_limit_and_stale_grid_meter_are_visible(self):
+        self.coordinator.settings["grid_import_limit_entity"] = "number.limit"
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["energy_reason"], "grid_limit_unavailable")
+        self.assertTrue(self.coordinator.data["energy_data_invalid"])
+        self.put("number.limit", "3000", unit_of_measurement="W")
+        self.states["sensor.grid"].last_reported = clock.current - timedelta(seconds=901)
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["energy_reason"], "grid_power_unavailable")
+        self.put("binary_sensor.grid", "off")
+        self.coordinator._evaluate()
+        self.assertNotEqual(self.coordinator.data["energy_reason"], "grid_power_unavailable")

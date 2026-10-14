@@ -14,6 +14,8 @@ POWER_KEYS = [
     "battery_charge_power",
     "battery_power",
     "grid_power",
+    "grid_import_limit",
+    "grid_import_margin",
     "ac_power",
     "solar_margin",
     "average_solar_margin",
@@ -90,5 +92,8 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
                 "ac_set_temperature_c": self.coordinator.data["ac_set_temperature"],
                 "estimated_ac_power_w": self.coordinator.settings["estimated_ac_power"],
                 "manual_until_date": self.coordinator.manual_date,
+                "grid_import_limit_w": self.coordinator.data["grid_import_limit"],
+                "grid_import_margin_w": self.coordinator.data["grid_import_margin"],
+                "grid_import_limit_active": self.coordinator.data["grid_import_limit_active"],
             }
         return None

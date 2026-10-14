@@ -19,6 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 "manual_pause",
                 "energy_data_invalid",
                 "command_failed",
+                "grid_import_limit_active",
             )
         ]
     )
@@ -47,6 +48,9 @@ class SolarClimateBinarySensor(SolarClimateEntity, BinarySensorEntity):
                 "minimum_soc": self.coordinator.settings["minimum_soc"],
                 "battery_power_w": data["battery_power"],
                 "energy_data_invalid": data["energy_data_invalid"],
+                "grid_import_limit_w": data["grid_import_limit"],
+                "grid_import_margin_w": data["grid_import_margin"],
+                "grid_import_limit_active": data["grid_import_limit_active"],
             }
         if self.key == "command_failed":
             return {"error": self.coordinator.data["command_error"]}

@@ -35,7 +35,9 @@ def configuration_values(data, options, defaults, removed):
     values["grid_absence_minutes"] = minutes
     values["grid_absence_delay"] = minutes * 60
     mode = saved.get("operation_mode", "observation" if saved.get("enabled", True) else "disabled")
-    values["operation_mode"] = mode if mode in ("disabled", "observation", "control") else "disabled"
+    values["operation_mode"] = (
+        mode if mode in ("disabled", "observation", "control") else "disabled"
+    )
     values.pop("enabled", None)
     return values
 
