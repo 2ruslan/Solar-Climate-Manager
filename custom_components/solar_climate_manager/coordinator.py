@@ -1,21 +1,31 @@
-"""Event-driven diagnostics and asynchronous persistence, without climate commands."""
+"""Event-driven observation and real climate control."""
 
+import asyncio
 import logging
 from datetime import timedelta
 
-from homeassistant.core import callback
+from homeassistant.core import Context, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
+from .climate_control import (
+    ACKNOWLEDGEMENT_SECONDS,
+    COMMAND_TIMEOUT_SECONDS,
+    acknowledgement_changes,
+    matches_acknowledgement,
+    normalized_target,
+    temperature_matches,
+)
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_SETTINGS
 from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
 from .power import power_watts, read_power, signed_power_watts, soc_percent
 from .settings import configuration_values
 from .strategy import (
-    DemoState,
+    ControlState,
     EnergySnapshot,
     decide,
     house_load_power,
@@ -36,7 +46,14 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.demand = False
         self.signature = None
-        self.demo = DemoState()
+        self.control = ControlState()
+        self.command_task = None
+        self.command_contexts = {}
+        self.expected_updates = []
+        self.unconfirmed_start = False
+        self.command_error = "none"
+        self.closed = False
+        self.last_command = None
         self.manual_date = None
         self.policy_signature = dict(self.settings)
 
@@ -47,11 +64,13 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             self.demand = saved.get("demand") is True
         self.manual_date = saved.get("manual_date")
         if saved.get("policy_signature") == self.policy_signature:
-            self.demo.restore(saved.get("demo"), dt_util.utcnow().timestamp())
-        elif isinstance(saved.get("demo"), dict):
-            previous = saved["demo"]
+            self.control.restore(
+                saved.get("control"), dt_util.utcnow().timestamp()
+            )
+        elif isinstance(saved.get("control"), dict):
+            previous = saved.get("control")
             now = dt_util.utcnow().timestamp()
-            self.demo.last_stop = (
+            self.control.last_stop = (
                 now
                 if previous.get("running") is True
                 else valid_timestamp(previous.get("last_stop"), now)
@@ -77,12 +96,14 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 "hvac_mode",
                 "target_temperature",
                 "hysteresis",
-                "enabled",
+                "operation_mode",
             )
         ]
 
     async def async_shutdown(self):
         """Complete persistence before a replacement coordinator loads the store."""
+        self.closed = True
+        await self._cancel_command()
         await self.store.async_save(self._stored_state())
 
     def _stored_state(self):
@@ -90,7 +111,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             "demand": self.demand,
             "signature": self.signature,
             "manual_date": self.manual_date,
-            "demo": serialize(self.demo),
+            "control": serialize(self.control),
             "policy_signature": self.policy_signature,
         }
 
@@ -101,7 +122,19 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             new = event.data.get("new_state")
             before = control_fingerprint(old.state, old.attributes) if old else None
             after = control_fingerprint(new.state, new.attributes) if new else None
+            context = getattr(new, "context", None)
+            self._prune_acknowledgements()
+            own = (
+                context is not None
+                and not getattr(context, "user_id", None)
+                and (
+                    context.id in self.command_contexts
+                    or context.parent_id in self.command_contexts
+                )
+            )
             if before is not None and after is not None and before != after:
+                own = own or self._matches_expected_update(old, new, context)
+            if before is not None and after is not None and before != after and not own:
                 self.manual_date = dt_util.now().date().isoformat()
                 self.store.async_delay_save(self._stored_state, 1)
         self._evaluate()
@@ -140,7 +173,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             mode=settings["hvac_mode"],
             previous_demand=self.demand,
             fresh=fresh,
-            enabled=settings["enabled"],
+            enabled=settings["operation_mode"] != "disabled",
             climate_valid=climate_valid,
         )
         if self.demand != decision.demand:
@@ -150,8 +183,10 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             "demand": decision.demand,
             "invalid_data": not decision.data_valid,
             "reason": decision.reason,
-            "automation_mode": "observation" if settings["enabled"] else "disabled",
+            "automation_mode": settings["operation_mode"],
             "control_allowed": False,
+            "command_error": self.command_error,
+            "command_failed": self.command_error != "none",
         }
         now = dt_util.utcnow()
         for key, source_key in POWER_SOURCES.items():
@@ -211,20 +246,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         ] is not None
         forecast_keys = ("forecast_power_now", "forecast_power_30m", "forecast_power_60m")
         forecasts = tuple(data[key] for key in forecast_keys)
-        # Multiple demo entries share their virtual power reservation if sources match.
-        reserved = sum(
-            other.runtime_data.settings["estimated_ac_power"]
-            for other in self.hass.config_entries.async_entries(DOMAIN)
-            if other.entry_id != self.entry.entry_id
-            and getattr(other, "runtime_data", None)
-            and getattr(other.runtime_data, "demo", None)
-            and other.runtime_data.demo.running
-            and settings.get("pv_power_entity")
-            and other.runtime_data.settings.get("pv_power_entity")
-            == settings.get("pv_power_entity")
-            and other.runtime_data.settings.get("load_power_entity")
-            == settings.get("load_power_entity")
-        )
         snapshot = EnergySnapshot(
             pv=data["pv_power"],
             load=data["load_power"],
@@ -234,25 +255,35 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             grid=grid,
             forecasts=forecasts,
             actual_ac_power=actual_ac,
-            other_virtual_power=reserved,
-            temperature_valid=decision.data_valid and (grid is True or ac_valid),
+            ac_power_valid=ac_valid,
+            temperature_valid=decision.data_valid,
             schedule_allowed=schedule is True,
         )
+        climate_available = climate is not None and climate.state not in ("unknown", "unavailable")
+        actual_running = climate.state != "off" if climate_available else self.control.running
+        if actual_running != self.control.running:
+            if actual_running:
+                self.control.last_start = now.timestamp()
+            else:
+                self.control.last_stop = now.timestamp()
+        self.control.running = actual_running
+        cycle_times = self.control.last_start, self.control.last_stop
         strategy = decide(
             snapshot,
-            self.demo,
+            self.control,
             settings,
             now=now.timestamp(),
             demand=decision.demand,
-            enabled=settings["enabled"],
+            enabled=settings["operation_mode"] != "disabled",
             manual=manual,
         )
         data.update(
             {
                 "grid_available": grid,
                 "energy_allowed": strategy.energy_allowed,
-                "virtual_running": strategy.virtual_running,
-                "demo_action": strategy.action,
+                "energy_reason": strategy.energy_reason,
+                "running": actual_running if climate_available else None,
+                "strategy_action": strategy.action,
                 "strategy_reason": strategy.reason,
                 "solar_margin": strategy.solar_margin,
                 "average_solar_margin": strategy.average_solar_margin,
@@ -265,7 +296,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 else None,
                 "manual_pause": manual,
                 "manual_status": "disabled"
-                if not settings["enabled"]
+                if settings["operation_mode"] == "disabled"
                 else "manual_today"
                 if manual
                 else "automatic",
@@ -283,16 +314,27 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 ),
             }
         )
+        data["control_allowed"] = (
+            settings["operation_mode"] == "control" and climate_valid and not manual
+        )
+        self.desired_running = strategy.running
+        # Persist actual cycle state, not the decision awaiting a device update.
+        self.control.running = actual_running
+        self.control.last_start, self.control.last_stop = cycle_times
         if stored_before != self._stored_state():
             self.store.async_delay_save(self._stored_state, 1)
         if self.data != data:
             if self.data is None or self.data.get("strategy_reason") != strategy.reason:
                 LOGGER.debug(
-                    "Demo entry %s: %s (%s)", self.entry.entry_id, strategy.action, strategy.reason
+                    "Entry %s: %s (%s)", self.entry.entry_id, strategy.action, strategy.reason
                 )
             if self.data is None or self.data.get("reason") != decision.reason:
                 LOGGER.debug("Entry %s: %s", self.entry.entry_id, decision.reason)
             self.async_set_updated_data(data)
+        if data["control_allowed"] and not self.closed and self.command_task is None:
+            self.command_task = self.entry.async_create_task(
+                self.hass, self._async_control(), "climate control", eager_start=False
+            )
 
     def _energy_value(self, source_key, now, kind):
         entity_id = self.settings.get(source_key)
@@ -321,3 +363,138 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         if max_age is not None and not is_fresh(now, state.last_reported, max_age):
             return None
         return state.state == "on"
+
+    async def _cancel_command(self):
+        if self.command_task is not None:
+            self.command_task.cancel()
+            try:
+                await self.command_task
+            except asyncio.CancelledError:
+                pass
+            self.command_task = None
+
+    async def async_set_mode(self, mode):
+        self.settings["operation_mode"] = mode
+        await self._cancel_command()
+        self.last_command = None
+        self.control.window.clear()
+        self.signature = self._signature()
+        self.policy_signature = dict(self.settings)
+        options = {**self.entry.options, "operation_mode": mode}
+        options.pop("enabled", None)
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        self._evaluate()
+
+    def _prune_acknowledgements(self):
+        now = dt_util.utcnow().timestamp()
+        self.command_contexts = {
+            key: expires for key, expires in self.command_contexts.items() if expires >= now
+        }
+        self.expected_updates = [
+            item for item in self.expected_updates if item["expires"] >= now and item["remaining"]
+        ]
+
+    def _matches_expected_update(self, old, new, context):
+        # Explicit user commands and unrelated automation contexts remain manual.
+        if context and (getattr(context, "user_id", None) or getattr(context, "parent_id", None)):
+            return False
+        changes = acknowledgement_changes(old, new)
+        for item in self.expected_updates:
+            if matches_acknowledgement(changes, item["remaining"]):
+                for key in changes:
+                    item["remaining"].pop(key)
+                return True
+        return False
+
+    def _set_command_error(self, error):
+        self.command_error = error
+        if self.data and self.data.get("command_error") != error:
+            self.async_set_updated_data(
+                {**self.data, "command_error": error, "command_failed": error != "none"}
+            )
+
+    def _control_command(self, climate):
+        if self.desired_running:
+            try:
+                target = normalized_target(
+                    self.settings["target_temperature"],
+                    climate.attributes,
+                    self.hass.config.units.temperature_unit,
+                )
+            except ValueError as error:
+                self._set_command_error(str(error))
+                return None
+            mode = self.settings["hvac_mode"]
+            if climate.state == mode and temperature_matches(
+                climate.attributes.get("temperature"), target
+            ):
+                self.last_command = None
+                self.unconfirmed_start = False
+                self._set_command_error("none")
+                return None
+            return "set_temperature", {"hvac_mode": mode, "temperature": target}
+        if climate.state == "off" and not self.unconfirmed_start:
+            self.last_command = None
+            self._set_command_error("none")
+            return None
+        return "set_hvac_mode", {"hvac_mode": "off"}
+
+    async def _async_control(self):
+        try:
+            while (
+                not self.closed
+                and self.settings["operation_mode"] == "control"
+                and self.data["control_allowed"]
+            ):
+                climate = self.hass.states.get(self.settings["climate_entity"])
+                if climate is None or climate.state in ("unknown", "unavailable"):
+                    return
+                if pause_active(self.manual_date, dt_util.now().date()):
+                    return
+                command = self._control_command(climate)
+                if command is None:
+                    return
+                service, payload = command
+                key = (service, tuple(payload.items()))
+                now = dt_util.utcnow().timestamp()
+                if (
+                    self.last_command
+                    and self.last_command[0] == key
+                    and now - self.last_command[1] < 30
+                ):
+                    return
+                self._prune_acknowledgements()
+                context = Context()
+                expires = now + ACKNOWLEDGEMENT_SECONDS
+                self.command_contexts[context.id] = expires
+                remaining = {
+                    name: value
+                    for name, value in payload.items()
+                    if (climate.state if name == "hvac_mode" else climate.attributes.get(name))
+                    != value
+                }
+                self.expected_updates.append({"expires": expires, "remaining": remaining})
+                self.last_command = (key, now)
+                if service == "set_temperature":
+                    self.unconfirmed_start = True
+                try:
+                    async with asyncio.timeout(COMMAND_TIMEOUT_SECONDS):
+                        await self.hass.services.async_call(
+                            "climate",
+                            service,
+                            {"entity_id": self.settings["climate_entity"], **payload},
+                            blocking=True,
+                            context=context,
+                        )
+                except (HomeAssistantError, TimeoutError):
+                    self._set_command_error("service_error")
+                    LOGGER.exception("Climate command failed for entry %s", self.entry.entry_id)
+                else:
+                    self._set_command_error("none")
+                    if service == "set_hvac_mode":
+                        self.unconfirmed_start = False
+                # Recompute after every service call: both state and timer deadlines
+                # may have changed. A stop overrides an unconfirmed physical start.
+                self._evaluate()
+        finally:
+            self.command_task = None

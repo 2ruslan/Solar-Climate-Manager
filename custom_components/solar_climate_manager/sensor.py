@@ -21,10 +21,12 @@ POWER_KEYS = [
 ]
 DURATION_KEYS = ["seconds_to_start", "seconds_to_stop"]
 ENUM_OPTIONS = {
-    "automation_mode": ["observation", "disabled"],
+    "automation_mode": ["disabled", "observation", "control"],
     "reason": ["invalid_data", "disabled", "temperature_demand", "temperature_satisfied"],
-    "demo_action": ACTIONS,
+    "strategy_action": ACTIONS,
     "strategy_reason": REASONS,
+    "energy_reason": REASONS,
+    "command_error": ["none", "service_error", "invalid_target", "unsupported_temperature"],
     "manual_status": ["automatic", "manual_today", "disabled"],
 }
 
@@ -71,9 +73,8 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        if self.key == "demo_action":
+        if self.key == "strategy_action":
             return {
-                "demo_only": True,
                 "target_temperature_c": self.coordinator.settings["target_temperature"],
                 "estimated_ac_power_w": self.coordinator.settings["estimated_ac_power"],
                 "manual_until_date": self.coordinator.manual_date,

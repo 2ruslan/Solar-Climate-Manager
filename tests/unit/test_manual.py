@@ -40,8 +40,8 @@ class ManualTests(unittest.TestCase):
         self.assertFalse(manual.pause_active("2026-10-13", date(2026, 10, 14)))
         self.assertFalse(manual.pause_active(None, date(2026, 10, 13)))
 
-    def test_no_service_calls_anywhere_in_demo(self):
-        for path in root.glob("*.py"):
+    def test_policy_modules_have_no_device_io(self):
+        for path in (root / name for name in ("strategy.py", "model.py", "manual.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):

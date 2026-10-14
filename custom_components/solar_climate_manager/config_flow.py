@@ -4,6 +4,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
+from .climate_control import normalized_target
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .settings import (
     ADVANCED_KEYS,
@@ -89,6 +90,12 @@ def validate(hass, data):
         or temperature.attributes.get("unit_of_measurement") not in ("°C", "°F")
     ):
         return "invalid_temperature"
+    try:
+        normalized_target(
+            data["target_temperature"], climate.attributes, hass.config.units.temperature_unit
+        )
+    except ValueError as error:
+        return str(error)
     if not valid_policy(data):
         return "invalid_soc_thresholds"
     for key in OPTIONAL_SOURCES:

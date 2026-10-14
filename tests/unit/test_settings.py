@@ -69,3 +69,17 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn("require_forecast", result)
         self.assertFalse(result["enabled"])
         self.assertFalse(settings.ADVANCED_KEYS & settings.ENERGY_KEYS)
+
+    def test_legacy_mode_migration_and_explicit_mode_priority(self):
+        defaults = {key: 600 for key in settings.FIXED_POLICY_KEYS}
+        defaults["grid_absence_delay"] = 600
+        for enabled, expected in ((True, "observation"), (False, "disabled")):
+            result = settings.configuration_values({"enabled": enabled}, {}, defaults, set())
+            self.assertEqual(result["operation_mode"], expected)
+            self.assertNotIn("enabled", result)
+        result = settings.configuration_values(
+            {"enabled": False}, {"operation_mode": "control"}, defaults, set()
+        )
+        self.assertEqual(result["operation_mode"], "control")
+        result = settings.configuration_values({}, {"operation_mode": "invalid"}, defaults, set())
+        self.assertEqual(result["operation_mode"], "disabled")

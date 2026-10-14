@@ -1,4 +1,4 @@
-"""Conservative external-change detection; this demo never issues commands."""
+"""Conservative external-change detection with local-date pause."""
 
 from datetime import date
 

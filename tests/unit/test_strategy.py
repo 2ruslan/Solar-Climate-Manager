@@ -15,7 +15,7 @@ policy = importlib.import_module("scm_strategy_test.strategy")
 
 class StrategyTests(unittest.TestCase):
     def setUp(self):
-        self.state = policy.DemoState()
+        self.state = policy.ControlState()
         self.snapshot = policy.EnergySnapshot(
             pv=2800,
             load=600,
@@ -41,7 +41,7 @@ class StrategyTests(unittest.TestCase):
 
     def start_solar(self):
         self.assertEqual(self.decide(0).reason, "start_confirmation")
-        self.assertEqual(self.decide(60).action, "would_start")
+        self.assertEqual(self.decide(60).action, "start")
 
     def test_grid_heats_at_night_without_forecast_or_pv(self):
         grid = replace(
@@ -53,26 +53,26 @@ class StrategyTests(unittest.TestCase):
             forecasts=(None, None, None),
         )
         self.assertEqual(self.decide(0, grid).reason, "grid_ready")
-        self.assertEqual(self.decide(1000, grid).action, "would_continue")
+        self.assertEqual(self.decide(1000, grid).action, "continue")
 
     def test_unlimited_grid_import_is_not_a_stop_condition(self):
         grid = replace(self.snapshot, grid=True, pv=0, load=6000, grid_power=6900)
-        self.assertEqual(self.decide(0, grid).action, "would_start")
-        self.assertEqual(self.decide(1000, grid).action, "would_continue")
+        self.assertEqual(self.decide(0, grid).action, "start")
+        self.assertEqual(self.decide(1000, grid).action, "continue")
 
     def test_forecast_never_gates_heating(self):
         self.assertEqual(
             self.decide(0, replace(self.snapshot, grid=True, forecasts=(0, 0, 0))).action,
-            "would_start",
+            "start",
         )
-        self.state = policy.DemoState()
+        self.state = policy.ControlState()
         no_forecast = replace(self.snapshot, forecasts=(None, None, None))
         self.decide(0, no_forecast)
-        self.assertEqual(self.decide(60, no_forecast).action, "would_start")
+        self.assertEqual(self.decide(60, no_forecast).action, "start")
 
     def test_low_soc_immediate_on_grid_and_off_grid(self):
         for grid in (True, False):
-            self.state = policy.DemoState(running=True, last_start=0)
+            self.state = policy.ControlState(running=True, last_start=0)
             self.assertEqual(
                 self.decide(1, replace(self.snapshot, grid=grid, soc=84)).reason, "low_soc"
             )
@@ -91,22 +91,22 @@ class StrategyTests(unittest.TestCase):
 
     def test_missing_solar_blocks_only_off_grid(self):
         for field in ("pv", "load"):
-            self.state = policy.DemoState()
+            self.state = policy.ControlState()
             self.assertEqual(
                 self.decide(0, replace(self.snapshot, **{field: None})).reason,
                 "invalid_energy_data",
             )
             self.assertEqual(
                 self.decide(0, replace(self.snapshot, grid=True, **{field: None})).action,
-                "would_start",
+                "start",
             )
 
     def test_grid_short_discharge_spike_does_not_stop(self):
         grid = replace(self.snapshot, grid=True)
         self.decide(0, grid)
         peak = replace(grid, battery=500, load=4000)
-        self.assertEqual(self.decide(10, peak).action, "would_continue")
-        self.assertEqual(self.decide(20, grid).action, "would_continue")
+        self.assertEqual(self.decide(10, peak).action, "continue")
+        self.assertEqual(self.decide(20, grid).action, "continue")
 
     def test_grid_sustained_discharge_stops_and_blocks_start(self):
         grid = replace(self.snapshot, grid=True)
@@ -121,11 +121,11 @@ class StrategyTests(unittest.TestCase):
         peak = replace(self.snapshot, load=4000)
         self.decide(50, peak)
         result = self.decide(60, peak)
-        self.assertEqual(result.action, "would_start")
+        self.assertEqual(result.action, "start")
         self.assertGreater(result.average_solar_margin, 0)
         self.assertLess(result.solar_margin, 0)
-        self.assertEqual(self.decide(61, peak).action, "would_continue")
-        self.assertEqual(self.decide(65).action, "would_continue")
+        self.assertEqual(self.decide(61, peak).action, "continue")
+        self.assertEqual(self.decide(65).action, "continue")
 
     def test_paired_outage_deficit_uses_selected_duration(self):
         self.cfg.update(shortage_delay=600, grid_absence_delay=900)
@@ -134,7 +134,7 @@ class StrategyTests(unittest.TestCase):
         outage = replace(self.snapshot, pv=500)
         self.decide(100, outage)
         result = self.decide(700, outage)
-        self.assertEqual(result.action, "would_continue")
+        self.assertEqual(result.action, "continue")
         self.assertEqual(result.seconds_to_stop, 300)
         self.assertEqual(self.decide(1000, outage).reason, "outage_deficit")
 
@@ -155,9 +155,9 @@ class StrategyTests(unittest.TestCase):
         grid = replace(self.snapshot, grid=True)
         self.decide(0, grid)
         self.assertEqual(self.decide(60, grid, demand=False).reason, "minimum_run")
-        self.assertEqual(self.decide(120, grid, demand=False).action, "would_stop")
+        self.assertEqual(self.decide(120, grid, demand=False).action, "stop")
         self.assertEqual(self.decide(121, grid).reason, "minimum_off")
-        self.assertEqual(self.decide(240, grid).action, "would_start")
+        self.assertEqual(self.decide(240, grid).action, "start")
 
     def test_manual_schedule_disabled(self):
         self.assertEqual(self.decide(0, manual=True).reason, "manual_pause")
@@ -175,17 +175,7 @@ class StrategyTests(unittest.TestCase):
             self.decide(0, replace(snapshot, battery=-2000)).reason, "invalid_energy_data"
         )
 
-    def test_shared_virtual_budget_applies_off_grid(self):
-        self.assertFalse(
-            self.decide(0, replace(self.snapshot, other_virtual_power=1800)).energy_allowed
-        )
-        self.assertTrue(
-            self.decide(
-                0, replace(self.snapshot, grid=True, other_virtual_power=1800)
-            ).energy_allowed
-        )
-
-    def test_virtual_load_is_not_subtracted_from_physical_load(self):
+    def test_actual_ac_load_is_subtracted_only_once(self):
         self.start_solar()
         self.assertEqual(self.decide(61).solar_margin, 1300)
         actual = replace(self.snapshot, load=1500, actual_ac_power=900)
@@ -195,7 +185,7 @@ class StrategyTests(unittest.TestCase):
         self.start_solar()
         saved = policy.serialize(self.state)
         self.assertNotIn("window", saved)
-        new = policy.DemoState()
+        new = policy.ControlState()
         new.restore(saved, 100)
         self.assertTrue(new.running)
         self.assertEqual(new.last_start, 60)
@@ -213,7 +203,41 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(70, bad).reason, "battery_discharge")
         self.assertEqual(self.decide(1000, bad).action, "wait")
         saved = policy.serialize(self.state)
-        self.state = policy.DemoState()
+        self.state = policy.ControlState()
         self.state.restore(saved, 2000)
         self.assertEqual(self.decide(2000, bad).reason, "battery_discharge")
-        self.assertEqual(self.decide(2001, grid).action, "would_start")
+        self.assertEqual(self.decide(2001, grid).action, "start")
+
+    def test_grid_permission_is_independent_of_operational_gates(self):
+        grid = replace(self.snapshot, grid=True, pv=None, load=None)
+        for kwargs, reason in (
+            ({"enabled": False}, "disabled"),
+            ({"manual": True}, "manual_pause"),
+        ):
+            self.state = policy.ControlState()
+            result = self.decide(0, grid, **kwargs)
+            self.assertEqual(result.reason, reason)
+            self.assertTrue(result.energy_allowed)
+            self.assertEqual(result.energy_reason, "grid_ready")
+            self.assertFalse(result.running)
+        for snapshot in (
+            replace(grid, schedule_allowed=False),
+            replace(grid, temperature_valid=False),
+        ):
+            result = self.decide(0, snapshot)
+            self.assertTrue(result.energy_allowed)
+            self.assertFalse(result.running)
+
+    def test_manual_pause_does_not_reset_discharge_diagnostics(self):
+        grid = replace(self.snapshot, grid=True, battery=500)
+        self.decide(0, grid, manual=True)
+        self.decide(30, grid, manual=True)
+        result = self.decide(60, grid, manual=True)
+        self.assertFalse(result.energy_allowed)
+        self.assertEqual(result.energy_reason, "battery_discharge")
+
+    def test_missing_ac_meter_blocks_only_off_grid_energy_permission(self):
+        result = self.decide(0, replace(self.snapshot, ac_power_valid=False))
+        self.assertFalse(result.energy_allowed)
+        result = self.decide(0, replace(self.snapshot, grid=True, ac_power_valid=False))
+        self.assertTrue(result.energy_allowed)

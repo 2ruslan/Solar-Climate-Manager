@@ -69,7 +69,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("allow_forecast_trial", energy["data_schema"].schema)
 
     async def test_edit_preserves_disabled_and_other_sections(self):
-        self.entry.options = {"enabled": False, "minimum_soc": 90}
+        self.entry.options = {"operation_mode": "disabled", "minimum_soc": 90}
         result = await self.flow.async_step_comfort(
             {
                 "target_temperature": 24,
@@ -79,7 +79,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.assertEqual(result["type"], "create_entry")
-        self.assertFalse(result["data"]["enabled"])
+        self.assertEqual(result["data"]["operation_mode"], "disabled")
         self.assertEqual(result["data"]["minimum_soc"], 90)
         self.assertEqual(result["data"]["pv_power_entity"], "sensor.pv")
 
@@ -102,3 +102,14 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["data"]["pv_power_entity"])
         self.assertEqual(result["data"]["schedule_entity"], "schedule.day")
         self.assertEqual(result["data"]["target_temperature"], 23)
+
+    async def test_out_of_range_target_rejected_by_comfort_form(self):
+        self.states["climate.ac"].attributes.update(min_temp=16, max_temp=30, supported_features=1)
+        result = await self.flow.async_step_comfort({"target_temperature": 35})
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(result["errors"]["base"], "invalid_target")
+
+    async def test_unsupported_single_target_rejected_by_form(self):
+        self.states["climate.ac"].attributes["supported_features"] = 0
+        result = await self.flow.async_step_comfort({"target_temperature": 23})
+        self.assertEqual(result["errors"]["base"], "unsupported_temperature")

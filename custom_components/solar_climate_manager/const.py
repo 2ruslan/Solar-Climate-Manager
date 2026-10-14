@@ -36,7 +36,7 @@ REMOVED_FORECAST_SETTINGS = {
     "forecast_period_minutes",
     "forecast_horizon",
 }
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 REMOVED_SETTINGS = (
     REMOVED_FORECAST_SETTINGS
     | {
@@ -60,7 +60,7 @@ DEFAULTS = {
     "hysteresis": 1.0,
     "hvac_mode": "heat",
     "max_data_age": 900,
-    "enabled": True,
+    "operation_mode": "observation",
     "power_max_data_age": 900,
     "grid_absence_minutes": 10,
 }

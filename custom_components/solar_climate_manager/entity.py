@@ -20,5 +20,9 @@ class SolarClimateEntity(CoordinatorEntity):
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=f"Solar Climate Manager {coordinator.entry.title}",
             manufacturer="Solar Climate Manager",
-            model="Demo strategy 0.2",
+            model="Climate control",
+            configuration_url=(
+                f"homeassistant://config/integrations/integration/{DOMAIN}"
+                f"#config_entry={coordinator.entry.entry_id}"
+            ),
         )

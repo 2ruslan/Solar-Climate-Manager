@@ -115,7 +115,7 @@ async def test_stale_reading(hass):
 
 async def test_disabled_persists(hass):
     entry = await setup(hass)
-    hass.config_entries.async_update_entry(entry, options={"enabled": False})
+    hass.config_entries.async_update_entry(entry, options={"operation_mode": "disabled"})
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.runtime_data.data["automation_mode"] == "disabled"
@@ -164,3 +164,55 @@ async def test_reject_energy_sensor_as_forecast(hass):
         data={**inputs(), "forecast_power_now_entity": "sensor.energy"},
     )
     assert result["errors"]["base"] == "invalid_power"
+
+
+async def test_select_mode_replaces_switch_and_survives_reload(hass):
+    entry = await setup(hass)
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_operation_mode")
+    assert entity_id is not None
+    assert registry.async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_enabled") is None
+    assert hass.states.get(entity_id).attributes["options"] == [
+        "disabled",
+        "observation",
+        "control",
+    ]
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": entity_id, "option": "disabled"}, blocking=True
+    )
+    assert entry.options["operation_mode"] == "disabled"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "disabled"
+
+
+async def test_grid_energy_permission_survives_disabled_mode(hass):
+    states(hass)
+    hass.states.async_set("binary_sensor.grid", "on")
+    hass.states.async_set("sensor.soc", "95", {"unit_of_measurement": "%"})
+    hass.states.async_set("sensor.battery", "0", {"unit_of_measurement": "W"})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **inputs(),
+            "operation_mode": "disabled",
+            "grid_available_entity": "binary_sensor.grid",
+            "soc_entity": "sensor.soc",
+            "battery_power_entity": "sensor.battery",
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["energy_allowed"]
+    assert entry.runtime_data.data["energy_reason"] == "grid_ready"
+    assert not entry.runtime_data.data["control_allowed"]
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    for key, expected in (("energy_reason", "grid_ready"), ("command_error", "none")):
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}")
+        assert hass.states.get(entity_id).state == expected
+    assert await hass.config_entries.async_unload(entry.entry_id)

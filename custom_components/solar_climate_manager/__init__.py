@@ -1,4 +1,4 @@
-"""Solar Climate Manager: observation-only version 0.1."""
+"""Solar Climate Manager: observation and real climate control."""
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Solar Climate Manager",
-        "description": "Demo only. After adding the integration, open Configure to select energy sources and limits. Observation is toggled on the device page.",
+        "description": "After adding, open Settings → Devices & services → Integrations → Solar Climate Manager and select the cog beside your entry to configure sources and limits. Change the operation mode on the device page.",
         "data": {
           "climate_entity": "Air conditioner",
           "temperature_entity": "Room temperature sensor",
@@ -19,7 +19,9 @@
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
       "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
       "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
-      "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %)."
+      "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
+      "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
+      "unsupported_temperature": "This climate entity does not support a single target temperature."
     },
     "abort": {
       "already_configured": "This climate entity is already configured."
@@ -28,7 +30,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Demo settings",
+        "title": "Settings",
         "menu_options": {
           "sources": "Data sources",
           "comfort": "Comfort",
@@ -55,7 +57,7 @@
           "grid_positive": "Positive grid power means",
           "load_includes_battery_charging": "Total consumption includes battery charging"
         },
-        "description": "Demo only. Other sections and the observation switch state are preserved."
+        "description": "Other settings and the operation mode are preserved."
       },
       "comfort": {
         "title": "Comfort",
@@ -66,15 +68,15 @@
           "hvac_mode": "Thermostat mode",
           "schedule_entity": "Allowed schedule helper (optional)"
         },
-        "description": "Demo only. Other sections and the observation switch state are preserved."
+        "description": "Other settings and the operation mode are preserved."
       },
       "energy": {
         "title": "Energy",
         "data": {
           "estimated_ac_power": "Conservative estimated AC power (W)",
-          "minimum_soc": "Minimum SOC: immediate demo stop below (%)"
+          "minimum_soc": "Minimum SOC: immediate stop below (%)"
         },
-        "description": "Demo only. Other sections and the observation switch state are preserved."
+        "description": "Other settings and the operation mode are preserved."
       },
       "advanced": {
         "title": "Advanced",
@@ -90,7 +92,9 @@
       "invalid_temperature": "Select a temperature sensor with °C or °F units.",
       "invalid_power": "Select an existing power sensor in W or kW (not Wh or kWh).",
       "invalid_soc_thresholds": "Minimum SOC must be between 0 and 100%.",
-      "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %)."
+      "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
+      "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
+      "unsupported_temperature": "This climate entity does not support a single target temperature."
     }
   },
   "selector": {
@@ -122,7 +126,7 @@
         "name": "Decision reason",
         "state": {
           "invalid_data": "Unavailable or stale data",
-          "disabled": "Observation disabled",
+          "disabled": "Automation disabled",
           "temperature_demand": "Temperature demand",
           "temperature_satisfied": "Temperature satisfied"
         }
@@ -130,8 +134,9 @@
       "automation_mode": {
         "name": "Automation mode",
         "state": {
-          "observation": "Observation",
-          "disabled": "Disabled"
+          "disabled": "Disabled",
+          "observation": "Observation only",
+          "control": "Full control"
         }
       },
       "pv_power": {
@@ -168,24 +173,15 @@
         "name": "Forecast budget after AC"
       },
       "seconds_to_start": {
-        "name": "Time to possible demo start"
+        "name": "Time to possible start"
       },
       "seconds_to_stop": {
-        "name": "Time to possible demo stop"
-      },
-      "demo_action": {
-        "name": "Demo strategy action",
-        "state": {
-          "would_start": "Would start",
-          "would_continue": "Would continue running",
-          "would_stop": "Would stop",
-          "wait": "Would wait"
-        }
+        "name": "Time to possible stop"
       },
       "strategy_reason": {
-        "name": "Demo strategy reason",
+        "name": "Strategy decision reason",
         "state": {
-          "disabled": "Demo disabled",
+          "disabled": "Automation disabled",
           "manual_pause": "External change: paused until midnight",
           "outside_schedule": "Outside allowed schedule or schedule unavailable",
           "invalid_energy_data": "Required data missing, stale or invalid",
@@ -199,13 +195,13 @@
           "minimum_off": "Waiting for minimum off time",
           "solar_ready": "Solar conditions confirmed",
           "grid_ready": "Grid available: temperature control allowed",
-          "running": "Virtual run; monitoring conditions"
+          "running": "Running: monitoring conditions"
         }
       },
       "manual_status": {
         "name": "Manual priority status",
         "state": {
-          "automatic": "Automatic demo strategy",
+          "automatic": "Automatic strategy",
           "manual_today": "Manual priority until midnight",
           "disabled": "Disabled"
         }
@@ -218,6 +214,44 @@
       },
       "average_solar_margin": {
         "name": "Average solar balance over 10 minutes"
+      },
+      "strategy_action": {
+        "name": "Strategy decision",
+        "state": {
+          "start": "Start",
+          "continue": "Continue",
+          "stop": "Stop",
+          "wait": "Wait"
+        }
+      },
+      "energy_reason": {
+        "name": "Energy permission reason",
+        "state": {
+          "disabled": "disabled",
+          "manual_pause": "External change: paused until midnight",
+          "outside_schedule": "Outside allowed schedule or schedule unavailable",
+          "invalid_energy_data": "Required data missing, stale or invalid",
+          "low_soc": "SOC below minimum",
+          "battery_discharge": "Battery discharge exceeds limit",
+          "outage_deficit": "Both outage and solar deficit timers expired",
+          "no_temperature_demand": "No temperature demand",
+          "minimum_run": "Waiting for minimum run time",
+          "insufficient_surplus": "Insufficient actual solar surplus",
+          "start_confirmation": "Assessing solar balance during outage",
+          "minimum_off": "Waiting for minimum off time",
+          "solar_ready": "Solar conditions confirmed",
+          "grid_ready": "Grid available: energy conditions allow operation",
+          "running": "Running: monitoring conditions"
+        }
+      },
+      "command_error": {
+        "name": "Air conditioner command error",
+        "state": {
+          "none": "No error",
+          "service_error": "Command failed or timed out",
+          "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
+          "unsupported_temperature": "This climate entity does not support a single target temperature."
+        }
       }
     },
     "binary_sensor": {
@@ -234,21 +268,29 @@
         "name": "Grid available"
       },
       "energy_allowed": {
-        "name": "Energy conditions allow demo operation"
-      },
-      "virtual_running": {
-        "name": "Virtual AC running"
+        "name": "Energy conditions allow operation"
       },
       "manual_pause": {
         "name": "Manual pause until midnight"
       },
       "energy_data_invalid": {
         "name": "Unavailable or stale energy data"
+      },
+      "running": {
+        "name": "Air conditioner on"
+      },
+      "command_failed": {
+        "name": "Climate control error"
       }
     },
-    "switch": {
-      "enabled": {
-        "name": "Observation"
+    "select": {
+      "operation_mode": {
+        "name": "Operation mode",
+        "state": {
+          "disabled": "Disabled",
+          "observation": "Observation only",
+          "control": "Full control"
+        }
       }
     }
   }
