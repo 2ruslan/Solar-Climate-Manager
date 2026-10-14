@@ -161,6 +161,8 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertTrue(self.coordinator.data["manual_pause"])
+        self.assertEqual(self.coordinator.settings["operation_mode"], "temporary_block")
+        self.assertEqual(self.entry.options["temporary_previous_mode"], "observation")
         await self.coordinator.async_shutdown()
         new = adapter.SolarClimateCoordinator(self.hass, self.entry)
         self.entry.runtime_data = new
@@ -171,7 +173,91 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             state.last_reported = clock.current
         new._evaluate()
         self.assertFalse(new.data["manual_pause"])
+        self.assertEqual(new.data["automation_mode"], "observation")
         self.assertEqual(new.data["strategy_action"], "continue")
+
+    async def test_temporary_block_returns_each_previous_mode_at_local_midnight(self):
+        for mode in ("disabled", "observation", "control"):
+            clock.current = datetime(2026, 10, 13, 20, 59, tzinfo=timezone.utc)
+            await self.coordinator.async_set_mode(mode)
+            await self.coordinator.async_set_mode("temporary_block")
+            # Repeated blocking must retain the original return mode.
+            await self.coordinator.async_set_mode("temporary_block")
+            self.assertEqual(self.entry.options["temporary_previous_mode"], mode)
+            self.assertFalse(self.coordinator.data["control_allowed"])
+            await self.coordinator.async_shutdown()
+            new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+            await new.async_initialize()
+            self.assertEqual(new.data["automation_mode"], "temporary_block")
+            clock.current += timedelta(minutes=1)
+            new._tick(clock.current)
+            self.assertEqual(new.data["automation_mode"], mode)
+            self.assertFalse(new.data["manual_pause"])
+            self.assertNotIn("temporary_previous_mode", self.entry.options)
+            await new.async_shutdown()
+            self.coordinator = adapter.SolarClimateCoordinator(self.hass, self.entry)
+            await self.coordinator.async_initialize()
+        await self.coordinator.async_shutdown()
+        self.hass.services.async_call.assert_not_called()
+
+    async def test_selecting_mode_clears_block_and_prevents_midnight_reversion(self):
+        await self.coordinator.async_set_mode("control")
+        await self.coordinator.async_set_mode("temporary_block")
+        await self.coordinator.async_set_mode("disabled")
+        self.assertIsNone(self.coordinator.manual_date)
+        clock.current += timedelta(days=1)
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["automation_mode"], "disabled")
+        await self.coordinator.async_set_mode("temporary_block")
+        await self.coordinator.async_set_mode("control")
+        self.assertTrue(self.coordinator.data["control_allowed"])
+        self.assertFalse(self.coordinator.data["manual_pause"])
+        await self.coordinator.async_shutdown()
+
+    async def test_legacy_manual_pause_migrates_to_visible_block(self):
+        await self.coordinator.async_shutdown()
+        saved = MemoryStore.saved[self.coordinator.store.key]
+        saved["manual_date"] = dt.now().date().isoformat()
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertEqual(new.data["automation_mode"], "temporary_block")
+        self.assertEqual(new.previous_mode, "observation")
+
+    async def test_temporary_block_survives_restart_after_midnight(self):
+        await self.coordinator.async_set_mode("disabled")
+        await self.coordinator.async_set_mode("temporary_block")
+        await self.coordinator.async_shutdown()
+        clock.current += timedelta(days=1)
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertEqual(new.data["automation_mode"], "disabled")
+        self.assertFalse(new.data["manual_pause"])
+
+    async def test_external_changes_keep_control_return_mode_after_settings_edit(self):
+        await self.coordinator.async_set_mode("control")
+        for target in (24, 25):
+            old = self.states["climate.ac"]
+            self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=target)
+            self.coordinator._state_changed(
+                SimpleNamespace(data={
+                    "entity_id": "climate.ac",
+                    "old_state": old,
+                    "new_state": self.states["climate.ac"],
+                })
+            )
+            self.assertEqual(self.coordinator.data["automation_mode"], "temporary_block")
+            self.assertEqual(self.coordinator.previous_mode, "control")
+        await self.coordinator.async_shutdown()
+        values = adapter.configuration_values(
+            self.entry.data, self.entry.options, constants.DEFAULTS, constants.REMOVED_SETTINGS
+        )
+        self.entry.options = {**values, "target_temperature": 22}
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertEqual(new.data["automation_mode"], "temporary_block")
+        self.assertEqual(new.previous_mode, "control")
+        self.assertFalse(new.data["control_allowed"])
+        self.hass.services.async_call.assert_not_called()
 
     async def test_signed_sources_and_stale_soc(self):
         self.coordinator.settings["battery_positive"] = "charge"

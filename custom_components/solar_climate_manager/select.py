@@ -1,9 +1,10 @@
-"""One persistent three-state operation selector."""
+"""One persistent four-state operation selector."""
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 
 from .entity import SolarClimateEntity
+from .settings import OPERATION_MODES
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -12,7 +13,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 class SolarClimateModeSelect(SolarClimateEntity, SelectEntity):
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_options = ["disabled", "observation", "control"]
+    _attr_options = list(OPERATION_MODES)
 
     @property
     def current_option(self):

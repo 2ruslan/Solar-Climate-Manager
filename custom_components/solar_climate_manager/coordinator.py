@@ -25,7 +25,7 @@ from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_SE
 from .manual import control_fingerprint, pause_active
 from .model import evaluate, is_fresh, temperature_celsius
 from .power import power_watts, read_power, signed_power_watts, soc_percent
-from .settings import configuration_values
+from .settings import BASE_MODES, OPERATION_MODES, configuration_values
 from .strategy import (
     ControlState,
     EnergySnapshot,
@@ -45,6 +45,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         super().__init__(hass, LOGGER, name=DOMAIN, config_entry=entry, always_update=False)
         self.entry = entry
         self.settings = configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS)
+        self.settings.pop("temporary_previous_mode", None)
+        self.settings.pop("temporary_block_date", None)
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.demand = False
         self.signature = None
@@ -58,6 +60,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.last_command = None
         self.last_target_update = None
         self.manual_date = None
+        self.previous_mode = None
         self.policy_signature = dict(self.settings)
 
     async def async_initialize(self):
@@ -66,6 +69,10 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         if saved.get("signature") == self.signature:
             self.demand = saved.get("demand") is True
         self.manual_date = saved.get("manual_date")
+        if self.settings["operation_mode"] == "temporary_block":
+            self.manual_date = self.entry.options.get("temporary_block_date", self.manual_date)
+            previous = self.entry.options.get("temporary_previous_mode")
+            self.previous_mode = previous if previous in BASE_MODES else "observation"
         if saved.get("policy_signature") == self.policy_signature:
             self.control.restore(saved.get("control"), dt_util.utcnow().timestamp())
         elif isinstance(saved.get("control"), dict):
@@ -136,7 +143,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             if before is not None and after is not None and before != after:
                 own = own or self._matches_expected_update(old, new, context)
             if before is not None and after is not None and before != after and not own:
-                self.manual_date = dt_util.now().date().isoformat()
+                self._set_operation_mode("temporary_block")
                 self.store.async_delay_save(self._stored_state, 1)
         self._evaluate()
 
@@ -150,7 +157,12 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         stored_before = self._stored_state()
         today = dt_util.now().date()
         manual = pause_active(self.manual_date, today)
-        if self.manual_date and not manual:
+        if settings["operation_mode"] == "temporary_block" and not manual:
+            self._set_operation_mode(self.previous_mode or "observation")
+        elif manual and settings["operation_mode"] != "temporary_block":
+            # Migrate the separate manual pause used by older versions.
+            self._set_operation_mode("temporary_block")
+        elif self.manual_date and not manual:
             self.manual_date = None
         state = self.hass.states.get(settings["temperature_entity"])
         climate = self.hass.states.get(settings["climate_entity"])
@@ -422,17 +434,37 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 pass
             self.command_task = None
 
-    async def async_set_mode(self, mode):
+    @callback
+    def _set_operation_mode(self, mode):
+        """Persist the visible mode and its midnight return state together."""
+        if mode not in OPERATION_MODES:
+            raise ValueError(mode)
+        options = dict(self.entry.options)
+        if mode == "temporary_block":
+            if self.settings["operation_mode"] != "temporary_block":
+                self.previous_mode = self.settings["operation_mode"]
+            self.manual_date = dt_util.now().date().isoformat()
+            options["temporary_previous_mode"] = self.previous_mode or "observation"
+            options["temporary_block_date"] = self.manual_date
+        else:
+            self.manual_date = None
+            self.previous_mode = None
+            options.pop("temporary_previous_mode", None)
+            options.pop("temporary_block_date", None)
         self.settings["operation_mode"] = mode
-        await self._cancel_command()
         self.last_command = None
         self.control.window.clear()
         self.signature = self._signature()
         self.policy_signature = dict(self.settings)
-        options = {**self.entry.options, "operation_mode": mode}
+        options["operation_mode"] = mode
         options.pop("enabled", None)
         self.hass.config_entries.async_update_entry(self.entry, options=options)
+
+    async def async_set_mode(self, mode):
+        self._set_operation_mode(mode)
+        await self._cancel_command()
         self._evaluate()
+        await self.store.async_save(self._stored_state())
 
     def _prune_acknowledgements(self):
         now = dt_util.utcnow().timestamp()

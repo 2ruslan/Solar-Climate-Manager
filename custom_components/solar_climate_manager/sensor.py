@@ -5,6 +5,7 @@ from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTemperature, Unit
 
 from .const import POWER_SOURCES
 from .entity import SolarClimateEntity
+from .settings import OPERATION_MODES
 from .strategy import ACTIONS, REASONS
 
 POWER_KEYS = [
@@ -30,7 +31,7 @@ TEMPERATURE_KEYS = [
 ]
 DURATION_KEYS = ["seconds_to_start", "seconds_to_stop"]
 ENUM_OPTIONS = {
-    "automation_mode": ["disabled", "observation", "control"],
+    "automation_mode": list(OPERATION_MODES),
     "reason": ["invalid_data", "disabled", "temperature_demand", "temperature_satisfied"],
     "strategy_action": ACTIONS,
     "strategy_reason": REASONS,

@@ -10,4 +10,5 @@ async def async_get_config_entry_diagnostics(hass, entry):
         },
         "decision": coordinator.data,
         "manual_until_date": coordinator.manual_date,
+        "mode_after_temporary_block": coordinator.previous_mode,
     }

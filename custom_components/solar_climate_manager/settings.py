@@ -1,5 +1,8 @@
 """UI metadata for control policy parameters."""
 
+OPERATION_MODES = ("disabled", "observation", "control", "temporary_block")
+BASE_MODES = OPERATION_MODES[:3]
+
 # key: min, max, step, unit
 NUMERIC_SETTINGS = {
     "estimated_ac_power": (100, 10000, 50, "W"),
@@ -36,7 +39,7 @@ def configuration_values(data, options, defaults, removed):
     values["grid_absence_delay"] = minutes * 60
     mode = saved.get("operation_mode", "observation" if saved.get("enabled", True) else "disabled")
     values["operation_mode"] = (
-        mode if mode in ("disabled", "observation", "control") else "disabled"
+        mode if mode in OPERATION_MODES else "disabled"
     )
     values.pop("enabled", None)
     return values

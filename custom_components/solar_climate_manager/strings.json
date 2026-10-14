@@ -137,7 +137,8 @@
         "state": {
           "disabled": "Disabled",
           "observation": "Observation only",
-          "control": "Full control"
+          "control": "Full control",
+          "temporary_block": "Temporary block"
         }
       },
       "pv_power": {
@@ -317,7 +318,8 @@
         "state": {
           "disabled": "Disabled",
           "observation": "Observation only",
-          "control": "Full control"
+          "control": "Full control",
+          "temporary_block": "Temporary block"
         }
       }
     }

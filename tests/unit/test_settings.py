@@ -83,3 +83,16 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(result["operation_mode"], "control")
         result = settings.configuration_values({}, {"operation_mode": "invalid"}, defaults, set())
         self.assertEqual(result["operation_mode"], "disabled")
+
+    def test_temporary_block_metadata_survives_section_edit(self):
+        defaults = {key: 600 for key in settings.FIXED_POLICY_KEYS}
+        defaults["grid_absence_delay"] = 600
+        options = {
+            "operation_mode": "temporary_block",
+            "temporary_previous_mode": "control",
+            "temporary_block_date": "2026-10-13",
+        }
+        values = settings.configuration_values({}, options, defaults, set())
+        merged = settings.merge_section(values, {"target_temperature": 22})
+        for key, value in options.items():
+            self.assertEqual(merged[key], value)
