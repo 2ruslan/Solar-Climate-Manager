@@ -12,6 +12,11 @@ class GroupRepository:
         self.store = store
         self.registry: GroupRegistry | None = None
         self._lock = asyncio.Lock()
+        self._listeners: set[Callable[[], None]] = set()
+
+    def subscribe(self, listener: Callable[[], None]) -> Callable[[], None]:
+        self._listeners.add(listener)
+        return lambda: self._listeners.discard(listener)
 
     async def async_load(self) -> GroupRegistry:
         async with self._lock:
@@ -27,7 +32,9 @@ class GroupRepository:
             updated = change(current)
             await self.store.async_save(serialize_registry(updated))
             self.registry = updated
-            return updated
+        for listener in tuple(self._listeners):
+            listener()
+        return updated
 
 
 def get_group_repository(hass: Any) -> GroupRepository:

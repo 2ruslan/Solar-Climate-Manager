@@ -24,6 +24,7 @@ class DeviceRequest:
     state_reported_at: float | None = None
     last_start: float | None = None
     last_stop: float | None = None
+    state_observed_at: float | None = None
 
     def __post_init__(self) -> None:
         if not self.device_id or self.operation_mode not in (
@@ -256,7 +257,7 @@ def reconcile(
                 reserve.stop_sent_at is not None
                 and request.running is False
                 and (
-                    _after(request.state_reported_at, reserve.stop_sent_at, snapshot.now)
+                    _after(request.state_observed_at or request.state_reported_at, reserve.stop_sent_at, snapshot.now)
                     and _covered(snapshot, request, reserve.stop_sent_at, policy)
                     and request.measured_watts <= reserve.baseline_watts
                 )
@@ -266,7 +267,7 @@ def reconcile(
                 reserve.sent_at is not None
                 and request.running is True
                 and (
-                    _after(request.state_reported_at, reserve.sent_at, snapshot.now)
+                    _after(request.state_observed_at or request.state_reported_at, reserve.sent_at, snapshot.now)
                     and _covered(snapshot, request, reserve.sent_at, policy)
                 )
             ):

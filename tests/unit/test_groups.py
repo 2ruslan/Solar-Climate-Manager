@@ -33,6 +33,28 @@ class GroupTests(unittest.TestCase):
             "Workshop", configured_sources(), groups.GroupPolicy(minimum_soc=70, restart_soc=80)
         )
 
+    def test_legacy_reservation_is_restored_as_uncertain(self):
+        data = groups.serialize_registry(self.registry.join("one", self.first))
+        data["schema_version"] = 1
+        data["unresolved"] = [{"device_id": "one", "group_id": self.first, "watts": 900}]
+        restored = groups.restore_registry(data)
+        self.assertEqual(restored.unresolved[0].phase, "uncertain")
+        self.assertIsNone(restored.unresolved[0].command_id)
+        self.assertEqual(groups.serialize_registry(restored)["schema_version"], 2)
+
+    def test_durable_command_metadata_round_trip(self):
+        reserve = groups.UnresolvedReservation("one", self.first, 850, 50, 100, 101,
+                                              110, "token", "command_pending")
+        state = replace(self.registry.join("one", self.first), unresolved=(reserve,))
+        restored = groups.restore_registry(json.loads(json.dumps(groups.serialize_registry(state))))
+        self.assertEqual(restored, state)
+        with self.assertRaises(ValueError):
+            replace(reserve, sent_at=None)
+        with self.assertRaises(ValueError):
+            replace(reserve, baseline_watts=-1)
+        with self.assertRaises(ValueError):
+            replace(reserve, command_id=None)
+
     def test_two_independent_devices_are_not_automatically_grouped(self):
         for device in ("entry-one", "entry-two"):
             self.assertIsNone(self.registry.membership(device))
@@ -120,7 +142,7 @@ class GroupTests(unittest.TestCase):
         valid = groups.serialize_registry(self.registry.join("one", self.first))
         invalid = [
             {},
-            {**valid, "schema_version": 2},
+            {**valid, "schema_version": 999},
             {**valid, "unresolved": None},
             {**valid, "memberships": [*valid["memberships"], *valid["memberships"]]},
             {**valid, "future_field": True},

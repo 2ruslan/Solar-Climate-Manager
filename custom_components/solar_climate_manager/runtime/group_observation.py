@@ -7,18 +7,13 @@ from typing import Any
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
+from ..adapters.group_sources import capture_group
 from ..adapters.groups import get_group_repository
-from ..adapters.sources import read_sources
 from ..domain.allocator import (
     AllocationState,
-    DeviceRequest,
-    GroupSnapshot,
     Reservation,
     allocate,
 )
-from ..domain.groups import MemberPolicy
-from ..domain.types import DeviceConfig
-from ..model import evaluate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,74 +83,14 @@ class GroupObserver:
             previous = replace(
                 previous,
                 reservations=tuple(
-                    Reservation(r.device_id, r.watts, now.timestamp(), phase="uncertain")
+                    Reservation(r.device_id, r.watts, r.created_at, baseline_watts=r.baseline_watts,
+                                sent_at=r.sent_at, stop_sent_at=r.stop_sent_at, phase="uncertain")
                     for r in registry.unresolved
                     if r.group_id == group.group_id
                 ),
             )
-            requests = []
-            captured = None
-            for member in members:
-                coordinator = self.devices[member.device_id]
-                settings = {**coordinator.settings, **asdict(group.policy), **asdict(group.sources)}
-                settings["load_includes_ac"] = group.policy.load_scope == "includes_all_members"
-                source = read_sources(
-                    get_state,
-                    settings,
-                    DeviceConfig.from_settings(settings),
-                    self.hass.config.units.temperature_unit,
-                    now,
-                )
-                captured = source
-                demand = evaluate(
-                    source.temperature,
-                    target=settings["target_temperature"],
-                    hysteresis=settings["hysteresis"],
-                    mode=settings["hvac_mode"],
-                    previous_demand=coordinator.runtime.demand,
-                    climate_valid=source.climate_valid and source.ac_target_temperature is not None,
-                )
-                power = source.readings["ac_power_entity"]
-                climate = get_state(settings["climate_entity"])
-                changed = getattr(
-                    climate, "last_changed", source.readings["climate_entity"].reported_at
-                )
-                observed = coordinator.runtime.observed
-                requests.append(
-                    DeviceRequest(
-                        member.device_id,
-                        MemberPolicy.from_settings(settings),
-                        member.priority,
-                        settings["operation_mode"],
-                        demand.demand,
-                        source.running,
-                        source.climate_valid,
-                        source.energy.schedule_allowed,
-                        source.energy.temperature_valid,
-                        measured_watts=source.values["ac_power"],
-                        power_reported_at=power.reported_at.timestamp()
-                        if power.reported_at
-                        else None,
-                        state_reported_at=changed.timestamp() if changed else None,
-                        last_start=observed.last_start
-                        if observed.running == source.running
-                        else now.timestamp(),
-                        last_stop=observed.last_stop
-                        if observed.running == source.running
-                        else now.timestamp(),
-                    )
-                )
-            assert captured is not None
-            load = captured.readings["load_power_entity"].reported_at
-            grid = captured.readings["grid_power_entity"].reported_at
-            snapshot = GroupSnapshot(
-                group.group_id,
-                now.timestamp(),
-                captured.energy,
-                tuple(requests),
-                load.timestamp() if load else None,
-                grid.timestamp() if grid else None,
-            )
+            snapshot = capture_group(group, members, self.devices, get_state,
+                                     self.hass.config.units.temperature_unit, now, dt_util.now().date())
             result = allocate(snapshot, previous, group.policy, shadow=True)
             self.states[group.group_id] = replace(result.state, reservations=previous.reservations)
             results[group.group_id] = {

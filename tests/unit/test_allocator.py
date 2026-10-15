@@ -25,6 +25,20 @@ class AllocatorTests(unittest.TestCase):
     def actions(self, result):
         return {d.device_id: (d.action, d.reason) for d in result.decisions}
 
+    def test_fresh_identical_off_report_confirms_stop_without_state_change(self):
+        request = replace(self.requests[0], measured_watts=0, power_reported_at=1001,
+                          state_reported_at=900, state_observed_at=1001)
+        snapshot = replace(self.snapshot, now=1002, requests=(request,), load_reported_at=1001)
+        state = replace(self.state, reservations=(
+            a.Reservation("a", 900, 980, phase="uncertain", sent_at=990, stop_sent_at=1000),))
+        settled, pending, _ = a.reconcile(snapshot, state, self.policy)
+        self.assertEqual(settled.reservations, ())
+        self.assertEqual(pending, 0)
+        stale = replace(snapshot, requests=(replace(request, state_observed_at=999),))
+        retained, pending, _ = a.reconcile(stale, state, self.policy)
+        self.assertEqual(retained.reservations, state.reservations)
+        self.assertEqual(pending, 900)
+
     def test_two_900w_requests_share_1000w_atomically(self):
         result = self.run_allocation()
         self.assertEqual(

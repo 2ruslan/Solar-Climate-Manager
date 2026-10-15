@@ -19,7 +19,7 @@ from ..climate_control import (
     normalized_target,
     temperature_matches,
 )
-from ..domain.types import CommandAttempt, CommandState, ExpectedUpdate
+from ..domain.types import CommandAttempt, CommandState, ControlIntent, ExpectedUpdate
 from ..manual import pause_active
 
 LOGGER = logging.getLogger(__name__)
@@ -36,6 +36,8 @@ class CommandExecutor:
         self.state = CommandState()
         self.task = None
         self.closed = False
+        self.authority = None
+        self.device_id = None
 
     def schedule(self):
         if not self.closed and self.task is None and self.get_data()["control_allowed"]:
@@ -106,7 +108,8 @@ class CommandExecutor:
         self.state.error = error
         self.publish_error(error)
 
-    def _control_command(self, climate):
+    def _control_command(self, climate, data=None):
+        data = self.get_data() if data is None else data
         if self.runtime.intent.running:
             try:
                 normalized_target(
@@ -117,8 +120,8 @@ class CommandExecutor:
                 target = normalized_target(
                     compensated_target(
                         self.runtime.device.target_temperature,
-                        self.get_data()["temperature"],
-                        self.get_data()["ac_temperature"],
+                        data["temperature"],
+                        data["ac_temperature"],
                     ),
                     climate.attributes,
                     self.hass.config.units.temperature_unit,
@@ -153,7 +156,7 @@ class CommandExecutor:
             if climate.state == mode and (
                 temperature_matches(climate.attributes.get("temperature"), target)
                 or current_valid and self.state.error == "none" and not compensation_needed(
-                    current_target, self.get_data()["ac_temperature"], mode
+                    current_target, data["ac_temperature"], mode
                 )
             ):
                 self.state.last_command = None
@@ -179,6 +182,14 @@ class CommandExecutor:
                     return
                 if pause_active(self.runtime.manual_date, dt_util.now().date()):
                     return
+                grouped = self.authority is not None and self.authority.controls(self.device_id)
+                if grouped:
+                    desired = self.authority.desired(self.device_id)
+                    if desired is None:
+                        return
+                    self.runtime.intent = ControlIntent(desired)
+                    if not desired and self.authority.has_pending(self.device_id):
+                        self.state.unconfirmed_start = True
                 command = self._control_command(climate)
                 if command is None:
                     return
@@ -198,6 +209,17 @@ class CommandExecutor:
                     and now - self.state.last_target_update < TARGET_UPDATE_SECONDS
                 ):
                     return
+                ticket = None
+                if grouped:
+                    try:
+                        ticket = await self.authority.async_authorize(self.device_id, service, payload, climate)
+                    except (HomeAssistantError, OSError, ValueError):
+                        self._set_command_error("service_error")
+                        LOGGER.exception("Group command authorization failed")
+                        return
+                    if ticket is None:
+                        return
+                now = dt_util.utcnow().timestamp()
                 self._prune_acknowledgements()
                 context = Context()
                 expires = now + ACKNOWLEDGEMENT_SECONDS
@@ -226,6 +248,8 @@ class CommandExecutor:
                         )
                 except asyncio.CancelledError:
                     attempt.service_status = "cancelled"
+                    if ticket is not None:
+                        await self.authority.async_finished(ticket, failed=True)
                     raise
                 except (HomeAssistantError, TimeoutError):
                     attempt.service_status = "failed"
@@ -236,6 +260,8 @@ class CommandExecutor:
                     self._set_command_error("none")
                     if service == "set_hvac_mode":
                         self.state.unconfirmed_start = False
+                if ticket is not None:
+                    await self.authority.async_finished(ticket, failed=attempt.service_status != "completed")
                 # Recompute after every service call: both state and timer deadlines
                 # may have changed. A stop overrides an unconfirmed physical start.
                 self.evaluate()

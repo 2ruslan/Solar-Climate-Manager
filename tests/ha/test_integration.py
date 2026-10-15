@@ -588,3 +588,403 @@ async def test_broken_group_store_does_not_break_independent_setup(hass):
     coordinator = entry.runtime_data
     assert coordinator.data["automation_mode"] == "observation"
     assert coordinator.group_observer.diagnostics(coordinator.device_id)["reason"] == "group_store_unavailable"
+
+
+def enable_group_control(*entries):
+    for entry in entries:
+        entry.runtime_data._set_operation_mode("control")
+        entry.runtime_data._evaluate()
+
+
+async def test_group_control_serializes_starts_and_persists_before_service(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    # Plenty of capacity still permits only one unconfirmed physical start.
+    hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
+    records = []
+
+    async def service(domain, name, data, **kwargs):
+        if name == "set_temperature":
+            records.append(data)
+            assert len(repository.registry.unresolved) == 1
+            assert repository.registry.unresolved[0].phase == "command_pending"
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        assert len(records) == 1
+        for _ in range(3):
+            first.runtime_data._evaluate()
+            second.runtime_data._evaluate()
+        await hass.async_block_till_done()
+        assert len(records) == 1
+        assert len(repository.registry.unresolved) == 1
+
+
+@pytest.mark.parametrize("change", ["soc", "mode", "target"])
+async def test_group_control_revalidates_after_durable_write(hass, change):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    save = repository.store.async_save
+
+    async def changed_during_save(data):
+        await save(data)
+        if data["unresolved"]:
+            if change == "soc":
+                hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+            elif change == "mode":
+                for entry in (first, second):
+                    entry.runtime_data._set_operation_mode("observation")
+            else:
+                for entry in (first, second):
+                    entry.runtime_data.settings["target_temperature"] = 19
+
+    with patch.object(type(repository.store), "async_save", side_effect=changed_during_save), patch.object(
+        type(hass.services), "async_call"
+    ) as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        calls.assert_not_called()
+        assert repository.registry.unresolved == ()
+
+
+async def test_group_control_storage_failure_never_dispatches_start(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    with patch.object(type(repository.store), "async_save", side_effect=OSError("disk full")), patch.object(
+        type(hass.services), "async_call"
+    ) as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        calls.assert_not_called()
+        assert repository.registry.unresolved == ()
+
+
+async def test_group_control_shared_source_stops_running_member(hass):
+    first, second, _, _ = await setup_shadow_group(hass)
+    # Set the physical state before enabling control; clear the manual pause.
+    hass.states.async_set("climate.test", "heat", {
+        "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21, "temperature": 25})
+    await hass.async_block_till_done()
+    hass.states.async_set("sensor.load", "1500", {"unit_of_measurement": "W"})
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first)
+        await hass.async_block_till_done()
+        calls.reset_mock()
+        hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+        await hass.async_block_till_done()
+        assert any(c.args[1] == "set_hvac_mode" and c.args[2]["entity_id"] == "climate.test"
+                   for c in calls.call_args_list), (calls.call_args_list, first.runtime_data.group_manager.diagnostics(first.runtime_data.device_id), first.runtime_data.data, first.runtime_data.commands.task)
+        assert second.runtime_data.settings["operation_mode"] == "observation"
+
+
+async def test_group_control_missing_member_blocks_starts(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    assert await hass.config_entries.async_unload(second.entry_id)
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first)
+        await hass.async_block_till_done()
+        calls.assert_not_called()
+        assert repository.registry.unresolved == ()
+
+
+async def test_group_control_reload_preserves_uncertainty_and_avoids_duplicate_start(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        reserve = repository.registry.unresolved[0]
+        entry = next(e for e in (first, second) if e.runtime_data.device_id == reserve.device_id)
+        calls.reset_mock()
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert not any(c.args[1] == "set_temperature" for c in calls.call_args_list)
+        assert any(c.args[1] == "set_hvac_mode" for c in calls.call_args_list)
+        assert repository.registry.unresolved[0].command_id == reserve.command_id
+        assert repository.registry.unresolved[0].stop_sent_at is not None
+
+
+async def test_group_control_releases_reserve_only_after_coherent_meter_reports(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    for entry, sensor in ((first, "sensor.ac_one"), (second, "sensor.ac_two")):
+        entry.runtime_data.settings["ac_power_entity"] = sensor
+        hass.states.async_set(sensor, "0", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.load", "600", {"unit_of_measurement": "W"}, force_update=True)
+    records = []
+
+    async def service(domain, name, data, **kwargs):
+        records.append((name, data, kwargs["context"]))
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        assert len(records) == 1
+        name, data, context = records[0]
+        started = next(e for e in (first, second)
+                       if e.runtime_data.settings["climate_entity"] == data["entity_id"])
+        token = repository.registry.unresolved[0].command_id
+        hass.states.async_set(data["entity_id"], "heat", {
+            "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21,
+            "temperature": data["temperature"]}, context=context)
+        await hass.async_block_till_done()
+        assert len(records) == 1  # Physical heat alone cannot fund the next start.
+        hass.states.async_set(started.runtime_data.settings["ac_power_entity"], "900",
+                              {"unit_of_measurement": "W"})
+        await hass.async_block_till_done()
+        assert len(records) == 1  # Aggregate still predates the individual meter.
+        hass.states.async_set("sensor.load", "1500", {"unit_of_measurement": "W"})
+        await hass.async_block_till_done()
+        assert len(records) == 2, (repository.registry.unresolved, first.runtime_data.group_manager.results, first.runtime_data.group_manager.task)
+        assert all(name == "set_temperature" for name, _, _ in records)
+        assert records[0][1]["entity_id"] != records[1][1]["entity_id"]
+        assert len(repository.registry.unresolved) == 1
+        assert repository.registry.unresolved[0].command_id != token
+
+
+async def test_group_control_slow_start_does_not_block_other_protective_stop(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    hass.states.async_set("climate.second", "heat", {
+        "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21, "temperature": 25})
+    await hass.async_block_till_done()
+    hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.load", "1500", {"unit_of_measurement": "W"})
+    started, stopped, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def service(domain, name, data, **kwargs):
+        if name == "set_temperature" and data["entity_id"] == "climate.test":
+            started.set()
+            await release.wait()
+        if name == "set_hvac_mode" and data["entity_id"] == "climate.second":
+            stopped.set()
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        try:
+            enable_group_control(first, second)
+            await asyncio.wait_for(started.wait(), 5)
+            assert repository.registry.unresolved
+            hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+            await asyncio.wait_for(stopped.wait(), 5)
+            assert not release.is_set()
+        finally:
+            release.set()
+            await hass.async_block_till_done()
+
+
+async def test_group_control_failure_isolated_between_groups(hass):
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.solar_climate_manager.domain.groups import GroupPolicy
+
+    first, second, repository, first_group = await setup_shadow_group(hass)
+    registry = await repository.async_update(lambda state: state.create(
+        "Workshop", state.group(first_group).sources, GroupPolicy(start_delay=0))[0])
+    second_id = second.runtime_data.device_id
+    await repository.async_update(lambda state: state.leave(second_id).join(second_id, registry.groups[1].group_id))
+    records = []
+
+    async def service(domain, name, data, **kwargs):
+        records.append((name, data["entity_id"]))
+        if data["entity_id"] == "climate.test":
+            raise HomeAssistantError("device offline")
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        assert ("set_temperature", "climate.test") in records
+        assert ("set_temperature", "climate.second") in records
+        assert len(repository.registry.unresolved) == 2
+        failed = next(r for r in repository.registry.unresolved if r.group_id == first_group)
+        assert failed.phase == "uncertain"
+
+
+async def test_group_control_storage_failure_does_not_block_protective_stop(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        assert repository.registry.unresolved
+        calls.reset_mock()
+        with patch.object(type(repository.store), "async_save", side_effect=OSError("disk full")):
+            hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+            await hass.async_block_till_done()
+        assert any(c.args[1] == "set_hvac_mode" for c in calls.call_args_list)
+        assert not any(c.args[1] == "set_temperature" for c in calls.call_args_list)
+        assert repository.registry.unresolved  # Off without durable proof does not release power.
+
+
+async def test_group_control_three_members_prioritize_and_account_for_manual_member(hass):
+    from dataclasses import replace
+
+    first, second, repository, group_id = await setup_shadow_group(hass)
+    hass.states.async_set("climate.third", "heat", {
+        "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21, "temperature": 25})
+    third = MockConfigEntry(domain=DOMAIN, data={**inputs(), "climate_entity": "climate.third"},
+                            unique_id="climate.third", version=1)
+    third.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(third.entry_id)
+    await hass.async_block_till_done()
+    await repository.async_update(lambda state: state.join(third.runtime_data.device_id, group_id))
+    high = second.runtime_data.device_id
+    await repository.async_update(lambda state: replace(state, memberships=tuple(
+        replace(m, priority=100) if m.device_id == high else m for m in state.memberships)))
+    hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.load", "1500", {"unit_of_measurement": "W"})
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        assert calls.call_count == 1
+        assert calls.call_args.args[2]["entity_id"] == "climate.second"
+        assert repository.registry.unresolved[0].device_id == high
+        hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+        await hass.async_block_till_done()
+        assert not any(c.args[2]["entity_id"] == "climate.third" for c in calls.call_args_list)
+        assert third.runtime_data.settings["operation_mode"] == "observation"
+
+
+async def test_group_control_manual_change_during_start_keeps_reservation(hass):
+    from homeassistant.core import Context
+
+    first, second, repository, _ = await setup_shadow_group(hass)
+    records = []
+
+    async def service(domain, name, data, **kwargs):
+        records.append((name, data["entity_id"]))
+        if name == "set_temperature":
+            hass.states.async_set(data["entity_id"], "cool", {
+                "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21,
+                "temperature": 18}, context=Context(user_id="manual-user"))
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        assert len(records) == 1
+        reserve = repository.registry.unresolved[0]
+        controlled = next(e for e in (first, second) if e.runtime_data.device_id == reserve.device_id)
+        assert controlled.runtime_data.settings["operation_mode"] == "temporary_block"
+        hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+        await hass.async_block_till_done()
+        assert len(records) == 1
+        assert repository.registry.unresolved
+
+
+async def test_group_control_restart_rebuilds_authority_from_persisted_reserve(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        reserve = repository.registry.unresolved[0]
+        manager = first.runtime_data.commands.authority
+        assert await hass.config_entries.async_unload(first.entry_id)
+        assert await hass.config_entries.async_unload(second.entry_id)
+        assert manager.task is None
+        assert not manager.devices
+        assert manager._source_unsub is None
+        for key in (f"{DOMAIN}.groups", f"{DOMAIN}.group_manager", f"{DOMAIN}.group_observer"):
+            hass.data.pop(key, None)
+        calls.reset_mock()
+        assert await hass.config_entries.async_setup(first.entry_id)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+        recovered = first.runtime_data.group_manager.repository
+        assert recovered is not repository
+        assert recovered.registry.unresolved[0].command_id == reserve.command_id
+        assert not any(c.args[1] == "set_temperature" for c in calls.call_args_list)
+        assert any(c.args[1] == "set_hvac_mode" for c in calls.call_args_list)
+
+
+async def test_group_control_off_report_during_save_is_not_dispatch_confirmation(hass):
+    first, second, repository, _ = await setup_shadow_group(hass)
+    for entry, sensor in ((first, "sensor.ac_one"), (second, "sensor.ac_two")):
+        entry.runtime_data.settings["ac_power_entity"] = sensor
+        hass.states.async_set(sensor, "0", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.load", "600", {"unit_of_measurement": "W"}, force_update=True)
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        reserve = repository.registry.unresolved[0]
+        owner = next(e for e in (first, second) if e.runtime_data.device_id == reserve.device_id)
+        save = repository.store.async_save
+
+        def report_off():
+            climate = hass.states.get(owner.runtime_data.settings["climate_entity"])
+            hass.states.async_set(climate.entity_id, "off", dict(climate.attributes), force_update=True)
+            hass.states.async_set(owner.runtime_data.settings["ac_power_entity"], "0",
+                                  {"unit_of_measurement": "W"}, force_update=True)
+            hass.states.async_set("sensor.load", "600", {"unit_of_measurement": "W"}, force_update=True)
+
+        async def report_during_save(data):
+            await save(data)
+            if data["unresolved"] and data["unresolved"][0]["stop_sent_at"] is not None:
+                report_off()
+
+        with patch.object(type(repository.store), "async_save", side_effect=report_during_save):
+            hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
+            await hass.async_block_till_done()
+        assert any(c.args[1] == "set_hvac_mode" for c in calls.call_args_list)
+        assert repository.registry.unresolved  # Reports were older than actual off dispatch.
+        report_off()
+        await hass.async_block_till_done()
+        assert repository.registry.unresolved == ()
+
+
+async def test_group_control_unreadable_membership_never_falls_back_to_local_policy(hass):
+    with patch("custom_components.solar_climate_manager.adapters.groups.GroupRepository.async_load",
+               side_effect=ValueError("unsupported_group_schema")), patch.object(
+                   type(hass.services), "async_call") as calls:
+        entry = await setup(hass, energy_ready=True)
+        await entry.runtime_data.async_set_mode("control")
+        await hass.async_block_till_done()
+        calls.assert_not_called()
+        assert entry.runtime_data.group_manager.diagnostics(entry.runtime_data.device_id)["starts_blocked"]
+
+
+async def test_group_control_unload_cancels_inflight_start_without_releasing_power(hass):
+    first, _, repository, _ = await setup_shadow_group(hass)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def service(domain, name, data, **kwargs):
+        if name == "set_temperature":
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        enable_group_control(first)
+        await asyncio.wait_for(started.wait(), 5)
+        reserve = repository.registry.unresolved[0]
+        coordinator = first.runtime_data
+        assert await hass.config_entries.async_unload(first.entry_id)
+        await hass.async_block_till_done()
+        assert cancelled.is_set()
+        assert coordinator.commands.closed
+        assert coordinator.commands.task is None
+        assert repository.registry.unresolved[0].command_id == reserve.command_id
+        assert repository.registry.unresolved[0].phase == "uncertain"
+
+
+async def test_group_control_deficit_sheds_only_lower_priority_member(hass):
+    from dataclasses import replace
+
+    first, second, repository, group_id = await setup_shadow_group(hass)
+    for entity in ("climate.test", "climate.second"):
+        hass.states.async_set(entity, "heat", {
+            "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21, "temperature": 25})
+    await hass.async_block_till_done()
+    group = repository.registry.group(group_id)
+    await repository.async_update(lambda state: state.update(replace(
+        group, policy=replace(group.policy, shortage_delay=0, grid_absence_delay=0))))
+    await repository.async_update(lambda state: replace(state, memberships=tuple(
+        replace(m, priority=10) if m.device_id == first.runtime_data.device_id else m
+        for m in state.memberships)))
+    hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.load", "2400", {"unit_of_measurement": "W"})
+    with patch.object(type(hass.services), "async_call") as calls:
+        enable_group_control(first, second)
+        await hass.async_block_till_done()
+        calls.reset_mock()
+        hass.states.async_set("sensor.pv", "1600", {"unit_of_measurement": "W"})
+        await hass.async_block_till_done()
+        assert [(c.args[1], c.args[2]["entity_id"]) for c in calls.call_args_list] == [
+            ("set_hvac_mode", "climate.second")]
+        assert repository.registry.unresolved == ()

@@ -1,6 +1,8 @@
 """Conservative external-change detection with local-date pause."""
 
+from collections.abc import Mapping
 from datetime import date
+from typing import Any
 
 CONTROL_ATTRIBUTES = (
     "temperature",
@@ -15,7 +17,7 @@ CONTROL_ATTRIBUTES = (
 )
 
 
-def control_fingerprint(state, attributes):
+def control_fingerprint(state: str, attributes: Mapping[str, Any]) -> tuple[Any, ...] | None:
     if state in ("unknown", "unavailable"):
         return None
     return (state, *(attributes.get(key) for key in CONTROL_ATTRIBUTES))

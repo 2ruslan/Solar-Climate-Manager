@@ -5,7 +5,7 @@ from math import isfinite
 from typing import Any, Literal
 from uuid import uuid4
 
-GROUP_SCHEMA_VERSION = 1
+GROUP_SCHEMA_VERSION = 2
 SHARED_SOURCE_KEYS = (
     "pv_power_entity",
     "load_power_entity",
@@ -196,6 +196,12 @@ class UnresolvedReservation:
     device_id: str
     group_id: str
     watts: float
+    baseline_watts: float = 0
+    created_at: float = 0
+    sent_at: float | None = None
+    stop_sent_at: float | None = None
+    command_id: str | None = None
+    phase: Literal["command_pending", "uncertain"] = "uncertain"
 
     def __post_init__(self) -> None:
         identifier(self.device_id)
@@ -204,9 +210,22 @@ class UnresolvedReservation:
             isinstance(self.watts, bool)
             or not isinstance(self.watts, (int, float))
             or not isfinite(self.watts)
-            or self.watts <= 0
+            or self.watts < 0
         ):
             raise ValueError("invalid_reservation")
+        if self.baseline_watts is None or self.created_at is None:
+            raise ValueError("invalid_reservation_time_or_baseline")
+        for value in (self.baseline_watts, self.created_at, self.sent_at, self.stop_sent_at):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value < 0):
+                raise ValueError("invalid_reservation_time_or_baseline")
+        if self.sent_at is not None and self.sent_at < self.created_at:
+            raise ValueError("invalid_dispatch_time")
+        if self.phase not in ("command_pending", "uncertain"):
+            raise ValueError("invalid_reservation_phase")
+        if self.command_id is not None:
+            identifier(self.command_id)
+        if self.phase == "command_pending" and (self.sent_at is None or self.command_id is None):
+            raise ValueError("missing_dispatch_identity")
 
 
 @dataclass(frozen=True)
@@ -297,7 +316,7 @@ def restore_registry(data: Any) -> GroupRegistry:
     if (
         not isinstance(data, dict)
         or type(data.get("schema_version")) is not int
-        or data["schema_version"] != GROUP_SCHEMA_VERSION
+        or data["schema_version"] not in (1, GROUP_SCHEMA_VERSION)
     ):
         raise ValueError("unsupported_group_schema")
     # Reject malformed/future data, never replace it with an empty registry.
