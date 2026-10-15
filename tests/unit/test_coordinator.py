@@ -380,7 +380,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "84", unit_of_measurement="%")
         self.coordinator._evaluate()
-        self.assertTrue(self.coordinator.control.soc_blocked)
+        self.assertTrue(self.coordinator.policy.soc_blocked)
         await self.coordinator.async_shutdown()
         self.entry.options = {"target_temperature": 24}
         self.put("sensor.soc", "88", unit_of_measurement="%")

@@ -1,0 +1,3 @@
+# Shared lint dependency; unit tests use the standard library only.
+ruff==0.17.0
+mypy==2.4.0

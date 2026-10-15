@@ -1,11 +1,13 @@
 """Exercise flow, platform setup, observation safety and persistence in HA."""
 
+import asyncio
 from datetime import timedelta
 from unittest.mock import patch
 
+import pytest
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.solar_climate_manager.const import DEFAULTS, DOMAIN
 
@@ -32,9 +34,19 @@ def states(hass, temperature="21"):
     )
 
 
-async def setup(hass):
+async def setup(hass, *, energy_ready=False):
     states(hass)
-    entry = MockConfigEntry(domain=DOMAIN, data=inputs(), unique_id="climate.test")
+    data = inputs()
+    if energy_ready:
+        hass.states.async_set("sensor.soc", "95", {"unit_of_measurement": "%"})
+        hass.states.async_set("sensor.battery", "0", {"unit_of_measurement": "W"})
+        hass.states.async_set("binary_sensor.grid", "on")
+        data.update(
+            soc_entity="sensor.soc",
+            battery_power_entity="sensor.battery",
+            grid_available_entity="binary_sensor.grid",
+        )
+    entry = MockConfigEntry(domain=DOMAIN, data=data, unique_id="climate.test")
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -64,7 +76,7 @@ async def test_flow_rejects_unsupported_mode(hass):
 
 
 async def test_observation_and_unavailable_data(hass):
-    with patch.object(hass.services, "async_call") as calls:
+    with patch.object(type(hass.services), "async_call") as calls:
         entry = await setup(hass)
         coordinator = entry.runtime_data
         assert coordinator.data["demand"]
@@ -182,6 +194,7 @@ async def test_select_mode_replaces_switch_and_survives_reload(hass):
         "disabled",
         "observation",
         "control",
+        "temporary_block",
     ]
     await hass.services.async_call(
         "select", "select_option", {"entity_id": entity_id, "option": "disabled"}, blocking=True
@@ -222,7 +235,8 @@ async def test_grid_energy_permission_survives_disabled_mode(hass):
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_ac_temperature_and_compensated_target_sensors(hass):
+@pytest.mark.parametrize(("maximum", "expected_target"), [(27, 27), (35, 30)])
+async def test_ac_temperature_and_compensated_target_sensors(hass, maximum, expected_target):
     from homeassistant.helpers import entity_registry as er
 
     states(hass)
@@ -238,7 +252,11 @@ async def test_ac_temperature_and_compensated_target_sensors(hass):
             "target_temp_step": 1,
         },
     )
-    entry = MockConfigEntry(domain=DOMAIN, data=inputs(), unique_id="climate.test")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**inputs(), "ac_max_temperature": maximum},
+        unique_id="climate.test",
+    )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -246,7 +264,7 @@ async def test_ac_temperature_and_compensated_target_sensors(hass):
     for key, expected in (
         ("ac_temperature", 28),
         ("temperature_offset", 7),
-        ("ac_target_temperature", 30),
+        ("ac_target_temperature", expected_target),
         ("ac_set_temperature", 29),
     ):
         entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}")
@@ -254,7 +272,7 @@ async def test_ac_temperature_and_compensated_target_sensors(hass):
     decision_id = registry.async_get_entity_id(
         "sensor", DOMAIN, f"{entry.entry_id}_strategy_action"
     )
-    assert hass.states.get(decision_id).attributes["ac_target_temperature_c"] == 30
+    assert hass.states.get(decision_id).attributes["ac_target_temperature_c"] == expected_target
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -291,3 +309,63 @@ async def test_inverter_limit_and_low_soc_charging(hass):
     assert entry.runtime_data.data["energy_allowed"]
     assert not entry.runtime_data.data["grid_import_limit_active"]
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.parametrize("mode", ["disabled", "observation", "temporary_block"])
+async def test_non_control_modes_send_no_climate_commands(hass, mode):
+    entry = await setup(hass, energy_ready=True)
+    assert entry.runtime_data.data["strategy_action"] == "start"
+    with patch.object(type(hass.services), "async_call") as calls:
+        await entry.runtime_data.async_set_mode(mode)
+        hass.states.async_set("sensor.room", "18", {"unit_of_measurement": "°C"})
+        await hass.async_block_till_done()
+        assert entry.runtime_data.data["control_allowed"] is False
+        calls.assert_not_called()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_temporary_block_survives_reload_and_returns_at_local_midnight(hass, freezer):
+    await hass.config.async_set_time_zone("Europe/Kyiv")
+    # Midnight in Kyiv is still the previous UTC date.
+    freezer.move_to("2026-10-14T20:59:40+00:00")
+    entry = await setup(hass)
+    await entry.runtime_data.async_set_mode("temporary_block")
+    assert entry.options["temporary_previous_mode"] == "observation"
+    assert entry.options["temporary_block_date"] == "2026-10-14"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["automation_mode"] == "temporary_block"
+    freezer.move_to("2026-10-14T21:00:15+00:00")
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["automation_mode"] == "observation"
+    assert "temporary_block_date" not in entry.options
+    assert "temporary_previous_mode" not in entry.options
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_unload_cancels_inflight_climate_command(hass):
+    entry = await setup(hass, energy_ready=True)
+    coordinator = entry.runtime_data
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def pending_command(domain, service, data, **kwargs):
+        assert domain == "climate"
+        assert service == "set_temperature"
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    with patch.object(type(hass.services), "async_call", side_effect=pending_command):
+        await coordinator.async_set_mode("control")
+        await asyncio.wait_for(started.wait(), timeout=2)
+        task = coordinator.command_task
+        assert task is not None
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert cancelled.is_set()
+        assert task.done()
+        assert coordinator.command_task is None
+        assert coordinator.closed

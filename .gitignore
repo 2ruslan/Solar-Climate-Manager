@@ -6,3 +6,5 @@ __pycache__/
 .dev-deps/
 htmlcov/
 .coverage
+test-results/
+.mypy_cache/

@@ -15,7 +15,8 @@ policy = importlib.import_module("scm_strategy_test.strategy")
 
 class StrategyTests(unittest.TestCase):
     def setUp(self):
-        self.state = policy.ControlState()
+        self.observed = policy.ObservedDeviceState()
+        self.state = policy.PolicyState()
         self.snapshot = policy.EnergySnapshot(
             pv=2800,
             load=600,
@@ -35,9 +36,15 @@ class StrategyTests(unittest.TestCase):
         }
 
     def decide(self, now=0, snapshot=None, demand=True, **kwargs):
-        return policy.decide(
-            snapshot or self.snapshot, self.state, self.cfg, now=now, demand=demand, **kwargs
+        evaluation = policy.decide(
+            snapshot or self.snapshot, self.observed, self.state,
+            policy.EnergyPolicyConfig.from_settings(self.cfg), now=now, demand=demand, **kwargs
         )
+        self.state = evaluation.policy
+        # These policy scenarios model an ideal device that confirms each intent immediately.
+        # Delayed/failed confirmation is exercised separately in contract and adapter tests.
+        self.observed = self.observed.observe(evaluation.decision.intent.running, now)
+        return evaluation.decision
 
     def start_solar(self):
         self.assertEqual(self.decide(0).reason, "start_confirmation")
@@ -65,16 +72,18 @@ class StrategyTests(unittest.TestCase):
             self.decide(0, replace(self.snapshot, grid=True, forecasts=(0, 0, 0))).action,
             "start",
         )
-        self.state = policy.ControlState()
+        self.observed = policy.ObservedDeviceState()
+        self.state = policy.PolicyState()
         no_forecast = replace(self.snapshot, forecasts=(None, None, None))
         self.decide(0, no_forecast)
         self.assertEqual(self.decide(60, no_forecast).action, "start")
 
     def test_low_soc_immediate_off_grid(self):
-        self.state = policy.ControlState(running=True, last_start=0)
+        self.observed = policy.ObservedDeviceState(running=True, last_start=0)
+        self.state = policy.PolicyState()
         result = self.decide(1, replace(self.snapshot, grid=False, soc=84))
         self.assertEqual(result.reason, "low_soc")
-        self.assertFalse(self.state.running)
+        self.assertFalse(self.observed.running)
 
     def test_soc_hysteresis_stops_immediately_and_waits_for_recovery(self):
         self.start_solar()
@@ -96,7 +105,8 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(self.state.soc_blocked)
 
     def test_soc_recovery_keeps_minimum_off_deadline(self):
-        self.state = policy.ControlState(running=True, last_start=0)
+        self.observed = policy.ObservedDeviceState(running=True, last_start=0)
+        self.state = policy.PolicyState()
         self.decide(1, replace(self.snapshot, soc=84))
         self.decide(2, replace(self.snapshot, soc=90))
         result = self.decide(62, replace(self.snapshot, soc=90))
@@ -106,9 +116,10 @@ class StrategyTests(unittest.TestCase):
 
     def test_soc_block_survives_restore_and_missing_measurement(self):
         self.decide(0, replace(self.snapshot, soc=84))
-        saved = policy.serialize(self.state)
-        self.state = policy.ControlState()
-        self.state.restore(saved, 10)
+        saved = policy.serialize(self.observed, self.state)
+        self.observed = policy.ObservedDeviceState()
+        self.state = policy.PolicyState()
+        self.observed, self.state = policy.restore(saved, 10)
         self.decide(10, replace(self.snapshot, soc=None))
         self.assertTrue(self.state.soc_blocked)
         self.assertEqual(self.decide(20, replace(self.snapshot, soc=89)).reason, "soc_recovery")
@@ -147,7 +158,8 @@ class StrategyTests(unittest.TestCase):
 
     def test_low_soc_blocks_battery_assisted_heating_even_with_grid(self):
         grid = replace(self.snapshot, grid=True, soc=70, battery=500)
-        self.state = policy.ControlState(running=True, last_start=0)
+        self.observed = policy.ObservedDeviceState(running=True, last_start=0)
+        self.state = policy.PolicyState()
         result = self.decide(1, grid)
         self.assertEqual(result.action, "stop")
         self.assertEqual(result.energy_reason, "battery_discharge")
@@ -165,7 +177,8 @@ class StrategyTests(unittest.TestCase):
 
     def test_missing_solar_blocks_only_off_grid(self):
         for field in ("pv", "load"):
-            self.state = policy.ControlState()
+            self.observed = policy.ObservedDeviceState()
+            self.state = policy.PolicyState()
             self.assertEqual(
                 self.decide(0, replace(self.snapshot, **{field: None})).reason,
                 "invalid_energy_data",
@@ -261,20 +274,21 @@ class StrategyTests(unittest.TestCase):
 
     def test_restore_requalifies_history_and_retains_cycle_timing(self):
         self.start_solar()
-        saved = policy.serialize(self.state)
+        saved = policy.serialize(self.observed, self.state)
         self.assertNotIn("window", saved)
-        new = policy.ControlState()
-        new.restore(saved, 100)
-        self.assertTrue(new.running)
-        self.assertEqual(new.last_start, 60)
+        observed, new = policy.restore(saved, 100)
+        self.assertTrue(observed.running)
+        self.assertEqual(observed.last_start, 60)
         self.assertFalse(new.window.samples)
 
     def test_invalid_future_timestamps_not_restored(self):
-        self.state.restore({"running": True, "last_start": 500}, 100)
-        self.assertFalse(self.state.running)
+        self.observed, self.state = policy.restore({"running": True, "last_start": 500}, 100)
+        self.assertFalse(self.observed.running)
 
     def test_retired_discharge_block_is_ignored_after_upgrade(self):
-        self.state.restore({"discharge_blocked": True, "adverse_since": 0}, 2000)
+        self.observed, self.state = policy.restore(
+            {"discharge_blocked": True, "adverse_since": 0}, 2000
+        )
         bad = replace(self.snapshot, grid=True, soc=98, battery=500)
         self.assertEqual(self.decide(2000, bad).action, "start")
         self.assertEqual(self.decide(4000, bad).action, "continue")
@@ -291,19 +305,20 @@ class StrategyTests(unittest.TestCase):
             ({"enabled": False}, "disabled"),
             ({"manual": True}, "manual_pause"),
         ):
-            self.state = policy.ControlState()
+            self.observed = policy.ObservedDeviceState()
+            self.state = policy.PolicyState()
             result = self.decide(0, grid, **kwargs)
             self.assertEqual(result.reason, reason)
             self.assertTrue(result.energy_allowed)
             self.assertEqual(result.energy_reason, "grid_ready")
-            self.assertFalse(result.running)
+            self.assertFalse(result.intent.running)
         for snapshot in (
             replace(grid, schedule_allowed=False),
             replace(grid, temperature_valid=False),
         ):
             result = self.decide(0, snapshot)
             self.assertTrue(result.energy_allowed)
-            self.assertFalse(result.running)
+            self.assertFalse(result.intent.running)
 
     def test_manual_pause_does_not_bypass_low_soc_discharge_protection(self):
         grid = replace(self.snapshot, grid=True, soc=84, battery=500)
@@ -335,7 +350,8 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(result.grid_import_margin, -400)
 
     def test_running_ac_is_not_added_to_grid_power_twice(self):
-        self.state = policy.ControlState(running=True, last_start=0)
+        self.observed = policy.ObservedDeviceState(running=True, last_start=0)
+        self.state = policy.PolicyState()
         grid = replace(
             self.snapshot,
             grid=True,
@@ -364,7 +380,8 @@ class StrategyTests(unittest.TestCase):
 
     def test_zero_and_unconfigured_limits_are_unlimited(self):
         for enabled in (False, True):
-            self.state = policy.ControlState()
+            self.observed = policy.ObservedDeviceState()
+            self.state = policy.PolicyState()
             grid = replace(
                 self.snapshot,
                 grid=True,

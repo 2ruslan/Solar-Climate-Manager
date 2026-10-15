@@ -8,3 +8,13 @@ select = ["E4", "E7", "E9", "F", "I"]
 [tool.pytest.ini_options]
 testpaths = ["tests/ha"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--strict-markers --strict-config --timeout=60"
+
+# Incremental boundary: pure contracts and policy only; HA adapters follow in later stages.
+[tool.mypy]
+python_version = "3.11"
+files = ["custom_components/solar_climate_manager/domain", "custom_components/solar_climate_manager/strategy.py", "custom_components/solar_climate_manager/window.py"]
+strict = true
+follow_imports = "silent"
+explicit_package_bases = true

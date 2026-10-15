@@ -87,19 +87,17 @@
 
 [Готова картка YAML](docs/lovelace-card.yaml) і [підстановка сутностей](docs/dashboard-card.md) містять статус, причини рішень, обидва пороги заряду, енергетичний баланс і графіки за 12 годин. Картка використовує стандартні компоненти HA; оновлений YAML потрібно застосувати окремо. Докладні правила: [стратегія](docs/strategy.md), [архітектура](docs/architecture.md).
 
-Локальні перевірки:
+Інструкція для розробки: [середовище, локальні перевірки та CI](docs/development.md).
+
+Базова ціль HA-тестів: Home Assistant 2026.10.1, Python 3.14.2, Linux. Версії залежностей зафіксовані в `requirements/ha.txt`; unit-тести запускаються окремим процесом і також перевіряються на Python 3.11.
 
 ```sh
+python -m pip install -r requirements/ha.txt
+python -m pip check
+python -m ruff check .
+python -m mypy
 python -m unittest discover -s tests/unit -v
-python -m compileall -q custom_components tests
-ruff check .
+python -m pytest -q tests/ha
 ```
 
-Інтеграційні тести HA потребують Linux та сумісної версії Python:
-
-```sh
-python -m pip install pytest-homeassistant-custom-component
-pytest -q tests/ha
-```
-
-Локальні тести перевіряють ядро та адаптер із моделями API. Роботу з фізичним кондиціонером перевіряйте у своїй інсталяції HA.
+Unit-тести перевіряють ядро й адаптер із моделями API; HA-тести — справжній життєвий цикл інтеграції. Роботу з фізичним кондиціонером перевіряйте у своїй інсталяції HA.
