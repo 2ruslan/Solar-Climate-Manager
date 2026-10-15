@@ -1,4 +1,4 @@
-"""Deterministic energy and comfort policy; device I/O belongs to the coordinator."""
+"""Deterministic energy and comfort policy; device I/O belongs to the command executor."""
 
 from copy import deepcopy
 from math import isfinite

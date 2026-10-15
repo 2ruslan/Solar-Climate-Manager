@@ -8,6 +8,6 @@ async def async_get_config_entry_diagnostics(hass, entry):
     return build_export(
         coordinator.settings,
         coordinator.data,
-        coordinator.manual_date,
-        coordinator.previous_mode,
+        coordinator.runtime.manual_date,
+        coordinator.runtime.previous_mode,
     )

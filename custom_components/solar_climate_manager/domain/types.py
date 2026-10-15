@@ -131,9 +131,21 @@ class ExpectedUpdate:
 
 
 @dataclass
+class CommandAttempt:
+    """Transport outcome and observed acknowledgement are independent facts."""
+
+    service: str
+    payload: dict[str, str | float]
+    sent_at: float
+    service_status: Literal["pending", "completed", "failed", "cancelled"] = "pending"
+    confirmed_at: float | None = None
+
+
+@dataclass
 class CommandState:
     """In-flight command bookkeeping; it does not establish a physical cycle."""
 
+    attempt: CommandAttempt | None = None
     contexts: dict[str, float] = field(default_factory=dict)
     expected_updates: list[ExpectedUpdate] = field(default_factory=list)
     unconfirmed_start: bool = False

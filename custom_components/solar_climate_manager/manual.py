@@ -21,7 +21,9 @@ def control_fingerprint(state, attributes):
     return (state, *(attributes.get(key) for key in CONTROL_ATTRIBUTES))
 
 
-def pause_active(until_date, today):
+def pause_active(until_date: str | None, today: date) -> bool:
+    if until_date is None:
+        return False
     try:
         return date.fromisoformat(until_date) >= today
     except (TypeError, ValueError):

@@ -11,10 +11,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "--strict-markers --strict-config --timeout=60"
 
-# Incremental boundary: pure contracts and policy only; HA adapters follow in later stages.
+# Incremental boundary: domain, policy, presentation, storage and pure device runtime.
 [tool.mypy]
 python_version = "3.11"
-files = ["custom_components/solar_climate_manager/domain", "custom_components/solar_climate_manager/strategy.py", "custom_components/solar_climate_manager/window.py", "custom_components/solar_climate_manager/presentation.py", "custom_components/solar_climate_manager/adapters/storage.py"]
+files = ["custom_components/solar_climate_manager/domain", "custom_components/solar_climate_manager/strategy.py", "custom_components/solar_climate_manager/window.py", "custom_components/solar_climate_manager/presentation.py", "custom_components/solar_climate_manager/adapters/storage.py", "custom_components/solar_climate_manager/runtime/device.py"]
 strict = true
 follow_imports = "silent"
 explicit_package_bases = true

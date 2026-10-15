@@ -204,7 +204,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await self.coordinator.async_set_mode("control")
         await self.coordinator.async_set_mode("temporary_block")
         await self.coordinator.async_set_mode("disabled")
-        self.assertIsNone(self.coordinator.manual_date)
+        self.assertIsNone(self.coordinator.runtime.manual_date)
         clock.current += timedelta(days=1)
         self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["automation_mode"], "disabled")
@@ -221,7 +221,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         new = adapter.SolarClimateCoordinator(self.hass, self.entry)
         await new.async_initialize()
         self.assertEqual(new.data["automation_mode"], "temporary_block")
-        self.assertEqual(new.previous_mode, "observation")
+        self.assertEqual(new.runtime.previous_mode, "observation")
 
     async def test_temporary_block_survives_restart_after_midnight(self):
         await self.coordinator.async_set_mode("disabled")
@@ -246,7 +246,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 })
             )
             self.assertEqual(self.coordinator.data["automation_mode"], "temporary_block")
-            self.assertEqual(self.coordinator.previous_mode, "control")
+            self.assertEqual(self.coordinator.runtime.previous_mode, "control")
         await self.coordinator.async_shutdown()
         values = adapter.configuration_values(
             self.entry.data, self.entry.options, constants.DEFAULTS, constants.REMOVED_SETTINGS
@@ -255,7 +255,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         new = adapter.SolarClimateCoordinator(self.hass, self.entry)
         await new.async_initialize()
         self.assertEqual(new.data["automation_mode"], "temporary_block")
-        self.assertEqual(new.previous_mode, "control")
+        self.assertEqual(new.runtime.previous_mode, "control")
         self.assertFalse(new.data["control_allowed"])
         self.hass.services.async_call.assert_not_called()
 
@@ -333,8 +333,8 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def control_mode(self):
         await self.coordinator.async_set_mode("control")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
 
     def own_update(self, mode="heat", temperature=23):
         old = self.states["climate.ac"]
@@ -358,8 +358,8 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             call.args[2], {"entity_id": "climate.ac", "hvac_mode": "heat", "temperature": 23}
         )
         self.own_update()
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertTrue(self.coordinator.data["running"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
@@ -367,12 +367,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_soc_stops_actual_climate(self):
         await self.control_mode()
         self.own_update()
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.call_args.args[1], "set_hvac_mode")
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
@@ -380,7 +380,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "84", unit_of_measurement="%")
         self.coordinator._evaluate()
-        self.assertTrue(self.coordinator.policy.soc_blocked)
+        self.assertTrue(self.coordinator.runtime.policy.soc_blocked)
         await self.coordinator.async_shutdown()
         self.entry.options = {"target_temperature": 24}
         self.put("sensor.soc", "88", unit_of_measurement="%")
@@ -420,31 +420,31 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await self.control_mode()
         self.hass.services.async_call.assert_not_called()
         self.put("climate.ac", "heat", hvac_modes=["heat", "cool", "off"], temperature=24)
-        self.coordinator.manual_date = dt.now().date().isoformat()
+        self.coordinator.runtime.manual_date = dt.now().date().isoformat()
         self.coordinator._evaluate()
         self.hass.services.async_call.assert_not_called()
 
     async def test_command_failure_retries_without_simulating_success(self):
         self.hass.services.async_call.side_effect = RuntimeError("device unavailable")
-        with self.assertLogs(adapter.LOGGER, level="ERROR"):
+        with self.assertLogs("scm_adapter_test.runtime.commands", level="ERROR"):
             await self.control_mode()
         self.assertFalse(self.coordinator.data["running"])
         clock.current += timedelta(seconds=30)
         self.coordinator._evaluate()
-        with self.assertLogs(adapter.LOGGER, level="ERROR"):
-            await self.coordinator.command_task
+        with self.assertLogs("scm_adapter_test.runtime.commands", level="ERROR"):
+            await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.await_count, 2)
 
     async def test_unchanged_temperature_keeps_graph_and_control_available(self):
         await self.control_mode()
         self.own_update()
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         # The source reports only when its reading changes, including across ticks.
         for age in (901, 7200, 172800):
             self.states["sensor.room"].last_reported = clock.current - timedelta(seconds=age)
             self.coordinator._evaluate()
-            await self.coordinator.command_task
+            await self.coordinator.commands.task
             self.assertEqual(self.coordinator.data["temperature"], 20)
             self.assertFalse(self.coordinator.data["invalid_data"])
             self.assertTrue(self.coordinator.data["demand"])
@@ -454,11 +454,11 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_temperature_still_stops_actual_climate(self):
         await self.control_mode()
         self.own_update()
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.put("sensor.room", "unavailable", unit_of_measurement="°C")
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertIsNone(self.coordinator.data["temperature"])
         self.assertTrue(self.coordinator.data["invalid_data"])
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
@@ -496,15 +496,15 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_temperature_satisfied_stops_after_minimum_run(self):
         await self.control_mode()
         self.own_update()
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.put("sensor.room", "25", unit_of_measurement="°C")
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.await_count, 1)
         clock.current += timedelta(seconds=600)
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
     async def test_shutdown_cancels_pending_command(self):
@@ -522,11 +522,116 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(data={"entity_id": "climate.ac", "old_state": old, "new_state": new})
         )
 
+    async def test_mode_change_cancels_active_service_without_confirming_it(self):
+        async def hang(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        self.hass.services.async_call.side_effect = hang
+        await self.coordinator.async_set_mode("control")
+        await asyncio.sleep(0)
+        attempt = self.coordinator.commands.state.attempt
+        await self.coordinator.async_set_mode("observation")
+        self.assertEqual(attempt.service_status, "cancelled")
+        self.assertIsNone(attempt.confirmed_at)
+        self.assertIsNone(self.coordinator.commands.task)
+        self.assertFalse(self.coordinator.runtime.observed.running)
+        self.assertTrue(self.coordinator.commands.state.unconfirmed_start)
+        await self.coordinator.async_shutdown()
+
+    async def test_diagnostics_reads_manual_state_from_device_runtime(self):
+        await self.coordinator.async_set_mode("temporary_block")
+        diagnostics = importlib.import_module("scm_adapter_test.diagnostics")
+        exported = await diagnostics.async_get_config_entry_diagnostics(self.hass, self.entry)
+        self.assertEqual(exported["manual_until_date"], self.coordinator.runtime.manual_date)
+
+    async def test_service_completion_requires_full_device_confirmation(self):
+        self.coordinator.settings["target_temperature"] = 24
+        await self.control_mode()
+        attempt = self.coordinator.commands.state.attempt
+        self.assertEqual(attempt.service_status, "completed")
+        self.assertIsNone(attempt.confirmed_at)
+        self.assertFalse(self.coordinator.runtime.observed.running)
+        self.device_response("heat")
+        self.assertIsNone(attempt.confirmed_at)
+        self.assertTrue(self.coordinator.runtime.observed.running)
+        clock.current += timedelta(seconds=1)
+        self.device_response("heat", temperature=24)
+        self.assertEqual(attempt.confirmed_at, clock.current.timestamp())
+        await self.coordinator.async_shutdown()
+
+    async def test_stop_timeout_keeps_physical_running_and_no_confirmation(self):
+        await self.control_mode()
+        self.device_response("heat")
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        self.put("binary_sensor.grid", "off")
+        self.put("sensor.soc", "40", unit_of_measurement="%")
+
+        async def hang(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        self.hass.services.async_call.side_effect = hang
+        commands = importlib.import_module("scm_adapter_test.runtime.commands")
+        with patch.object(commands, "COMMAND_TIMEOUT_SECONDS", 0.001):
+            with self.assertLogs(commands.LOGGER, level="ERROR"):
+                self.coordinator._evaluate()
+                await self.coordinator.commands.task
+        attempt = self.coordinator.commands.state.attempt
+        self.assertEqual(attempt.service, "set_hvac_mode")
+        self.assertEqual(attempt.service_status, "failed")
+        self.assertIsNone(attempt.confirmed_at)
+        self.assertTrue(self.coordinator.runtime.observed.running)
+        self.assertIsNone(self.coordinator.runtime.observed.last_stop)
+        self.device_response("off")
+        self.assertIsNotNone(attempt.confirmed_at)
+        self.assertFalse(self.coordinator.runtime.observed.running)
+        await self.coordinator.async_shutdown()
+
+    async def test_manual_change_during_service_prevents_followup_commands(self):
+        release = asyncio.Event()
+
+        async def slow(*args, **kwargs):
+            await release.wait()
+
+        self.hass.services.async_call.side_effect = slow
+        await self.coordinator.async_set_mode("control")
+        worker = self.coordinator.commands.task
+        await asyncio.sleep(0)
+        for _ in range(5):
+            self.coordinator._evaluate()
+            self.assertIs(self.coordinator.commands.task, worker)
+        self.device_response("cool", temperature=19)
+        self.assertEqual(self.coordinator.settings["operation_mode"], "temporary_block")
+        release.set()
+        await worker
+        self.assertEqual(self.hass.services.async_call.await_count, 1)
+        self.assertIsNone(self.coordinator.commands.task)
+        self.assertIsNone(self.coordinator.commands.state.attempt.confirmed_at)
+        await self.coordinator.async_shutdown()
+
+    async def test_shutdown_cancels_service_and_ignores_late_events(self):
+        async def hang(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        self.hass.services.async_call.side_effect = hang
+        await self.coordinator.async_set_mode("control")
+        await asyncio.sleep(0)
+        attempt = self.coordinator.commands.state.attempt
+        await self.coordinator.async_shutdown()
+        self.assertEqual(attempt.service_status, "cancelled")
+        self.assertIsNone(attempt.confirmed_at)
+        saved = self.coordinator._stored_state()
+        self.device_response("heat")
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator._stored_state(), saved)
+        self.assertIsNone(self.coordinator.commands.task)
+        self.assertEqual(self.hass.services.async_call.await_count, 1)
+
     async def test_contextless_response_does_not_pause(self):
         await self.control_mode()
         self.device_response("heat")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertTrue(self.coordinator.data["energy_allowed"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
@@ -535,11 +640,11 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.coordinator.settings["target_temperature"] = 24
         await self.control_mode()
         self.device_response("heat")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.device_response("heat", temperature=24)
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
 
@@ -572,12 +677,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await self.control_mode()
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 24)
         self.device_response("heat", temperature=24)
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         for _ in range(3):
             clock.current += timedelta(seconds=30)
             self.coordinator._evaluate()
-            await self.coordinator.command_task
+            await self.coordinator.commands.task
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
 
@@ -591,14 +696,14 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_command_failure_visible_and_clears_after_success(self):
         self.hass.services.async_call.side_effect = RuntimeError("offline")
-        with self.assertLogs(adapter.LOGGER, level="ERROR"):
+        with self.assertLogs("scm_adapter_test.runtime.commands", level="ERROR"):
             await self.control_mode()
         self.assertEqual(self.coordinator.data["command_error"], "service_error")
         self.assertTrue(self.coordinator.data["command_failed"])
         self.hass.services.async_call.side_effect = None
         clock.current += timedelta(seconds=30)
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.coordinator.data["command_error"], "none")
         self.assertFalse(self.coordinator.data["command_failed"])
 
@@ -613,7 +718,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
             self.hass.services.async_call.side_effect = slow_start
             await self.coordinator.async_set_mode("control")
-            worker = self.coordinator.command_task
+            worker = self.coordinator.commands.task
             await asyncio.sleep(0)
             if report_start:
                 self.device_response("heat")
@@ -636,14 +741,14 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             await never.wait()
 
         self.hass.services.async_call.side_effect = hang
-        with patch.object(adapter, "COMMAND_TIMEOUT_SECONDS", 0.001):
-            with self.assertLogs(adapter.LOGGER, level="ERROR"):
+        with patch.object(importlib.import_module("scm_adapter_test.runtime.commands"), "COMMAND_TIMEOUT_SECONDS", 0.001):
+            with self.assertLogs("scm_adapter_test.runtime.commands", level="ERROR"):
                 await self.control_mode()
         self.assertTrue(self.coordinator.data["command_failed"])
-        self.assertIsNone(self.coordinator.command_task)
+        self.assertIsNone(self.coordinator.commands.task)
 
     async def test_grid_energy_permission_is_independent_of_manual_pause_and_mode(self):
-        self.coordinator.manual_date = dt.now().date().isoformat()
+        self.coordinator.runtime.manual_date = dt.now().date().isoformat()
         self.put("sensor.room", "unavailable")
         for mode in ("disabled", "observation", "control"):
             await self.coordinator.async_set_mode(mode)
@@ -665,15 +770,15 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_contextless_stop_response_does_not_pause(self):
         await self.control_mode()
         self.device_response("heat")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.device_response("off")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertFalse(self.coordinator.data["running"])
 
@@ -697,15 +802,15 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("sensor.battery", "500", unit_of_measurement="W")
         await self.control_mode()
         self.device_response("heat")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         for minutes in (10, 10):
             clock.current += timedelta(minutes=minutes)
             for state in self.states.values():
                 state.last_reported = clock.current
             self.coordinator._evaluate()
-            if self.coordinator.command_task:
-                await self.coordinator.command_task
+            if self.coordinator.commands.task:
+                await self.coordinator.commands.task
             self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
             self.assertTrue(self.coordinator.data["running"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
@@ -742,22 +847,22 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_temperature_correction_is_limited_but_stop_is_immediate(self):
         await self.control_mode()
         self.device_response("heat")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.device_response("heat", current_temperature=25)
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.assertFalse(self.coordinator.data["manual_pause"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
         clock.current += timedelta(seconds=60)
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 27)
         self.assertEqual(self.hass.services.async_call.await_count, 2)
         self.put("binary_sensor.grid", "off")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
         self.assertEqual(self.hass.services.async_call.await_count, 3)
 
@@ -775,7 +880,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             current_temperature=None,
         )
         self.coordinator._evaluate()
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
     async def test_compensated_target_clamps_to_device_range(self):
@@ -816,17 +921,17 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 self.put("climate.ac", mode, hvac_modes=["heat", "cool", "off"],
                          temperature=target, current_temperature=current)
                 self.coordinator._evaluate()
-                self.assertIsNone(self.coordinator._control_command(self.states["climate.ac"]))
+                self.assertIsNone(self.coordinator.commands._control_command(self.states["climate.ac"]))
             self.states["climate.ac"].attributes["current_temperature"] = small
             self.coordinator._evaluate()
-            command = self.coordinator._control_command(self.states["climate.ac"])
+            command = self.coordinator.commands._control_command(self.states["climate.ac"])
             self.assertEqual(command[1]["temperature"], expected)
 
     async def test_out_of_bounds_target_is_corrected_even_with_ample_reserve(self):
         self.put("climate.ac", "heat", hvac_modes=["heat", "off"],
                  temperature=28, current_temperature=24)
         self.coordinator._evaluate()
-        command = self.coordinator._control_command(self.states["climate.ac"])
+        command = self.coordinator.commands._control_command(self.states["climate.ac"])
         self.assertEqual(command[1]["temperature"], 27)
 
     async def test_capped_target_is_not_repeated_when_reserve_is_small(self):
@@ -834,7 +939,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                  temperature=27, current_temperature=26)
         self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["ac_target_temperature"], 27)
-        self.assertIsNone(self.coordinator._control_command(self.states["climate.ac"]))
+        self.assertIsNone(self.coordinator.commands._control_command(self.states["climate.ac"]))
 
     async def test_custom_temperature_limits_survive_reload(self):
         await self.coordinator.async_shutdown()
@@ -851,10 +956,10 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("climate.ac", "heat", hvac_modes=["heat", "off"],
                  temperature=78.8, current_temperature=75.2)
         self.coordinator._evaluate()
-        self.assertIsNone(self.coordinator._control_command(self.states["climate.ac"]))
+        self.assertIsNone(self.coordinator.commands._control_command(self.states["climate.ac"]))
         self.states["climate.ac"].attributes["current_temperature"] = 77
         self.coordinator._evaluate()
-        command = self.coordinator._control_command(self.states["climate.ac"])
+        command = self.coordinator.commands._control_command(self.states["climate.ac"])
         self.assertEqual(command[1]["temperature"], 80.6)
 
     async def test_limit_metadata_is_read_automatically_and_not_aged(self):
@@ -897,11 +1002,11 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("sensor.grid", "1800", unit_of_measurement="W")
         await self.control_mode()
         self.device_response("heat")
-        if self.coordinator.command_task:
-            await self.coordinator.command_task
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
         self.put("number.limit", "1000", unit_of_measurement="W")
         self.coordinator._state_changed(SimpleNamespace(data={"entity_id": "number.limit"}))
-        await self.coordinator.command_task
+        await self.coordinator.commands.task
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
         self.assertEqual(self.coordinator.data["energy_reason"], "grid_import_limit")
 

@@ -362,10 +362,10 @@ async def test_unload_cancels_inflight_climate_command(hass):
     with patch.object(type(hass.services), "async_call", side_effect=pending_command):
         await coordinator.async_set_mode("control")
         await asyncio.wait_for(started.wait(), timeout=2)
-        task = coordinator.command_task
+        task = coordinator.commands.task
         assert task is not None
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert cancelled.is_set()
         assert task.done()
-        assert coordinator.command_task is None
-        assert coordinator.closed
+        assert coordinator.commands.task is None
+        assert coordinator.commands.closed

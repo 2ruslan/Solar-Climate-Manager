@@ -97,7 +97,7 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
                 "ac_min_temperature_c": self.coordinator.settings["ac_min_temperature"],
                 "ac_max_temperature_c": self.coordinator.settings["ac_max_temperature"],
                 "estimated_ac_power_w": self.coordinator.settings["estimated_ac_power"],
-                "manual_until_date": self.coordinator.manual_date,
+                "manual_until_date": self.coordinator.runtime.manual_date,
                 "grid_import_limit_w": self.coordinator.data["grid_import_limit"],
                 "grid_import_margin_w": self.coordinator.data["grid_import_margin"],
                 "grid_import_limit_active": self.coordinator.data["grid_import_limit_active"],
