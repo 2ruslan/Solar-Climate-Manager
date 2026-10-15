@@ -97,9 +97,9 @@ def build_export(
     previous_mode: str | None,
 ) -> dict[str, Any]:
     return {
-        "version": "0.4.1",
+        "version": "0.5.0",
         "settings": {key: value for key, value in settings.items() if not key.endswith("_entity")},
-        "decision": data,
+        "decision": {key: value for key, value in data.items() if key != "group_name"} if data is not None else None,
         "manual_until_date": manual_date,
         "mode_after_temporary_block": previous_mode,
     }

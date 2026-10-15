@@ -13,6 +13,15 @@
           "ac_min_temperature": "Minimum AC command temperature (°C)",
           "ac_max_temperature": "Maximum AC command temperature (°C)"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure device bindings",
+        "description": "Choose the AC and room sensor. Identity, group and mode are preserved. First leave Control mode and wait for command confirmation.",
+        "data": {
+          "climate_entity": "Air conditioner",
+          "temperature_entity": "Room temperature sensor",
+          "hvac_mode": "Thermostat mode"
+        }
       }
     },
     "error": {
@@ -24,10 +33,24 @@
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
       "unsupported_temperature": "This climate entity does not support a single target temperature.",
-      "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device."
+      "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device.",
+      "switch_to_observation": "Switch affected devices from Control to Observation or Disabled before changing their bindings or group configuration.",
+      "unresolved_reservation": "An unresolved power reservation prevents this change. Wait for physical and meter confirmation; do not erase the reservation.",
+      "command_in_progress": "Wait for the active command and its physical confirmation.",
+      "missing_group": "The selected group no longer exists.",
+      "device_already_grouped": "This device already belongs to a group. Leave it before joining another.",
+      "group_has_members": "Only an empty group can be deleted.",
+      "configuration_changed": "Configuration changed while this form was open. Reopen the form.",
+      "invalid_priority": "Priority must be a non-negative whole number.",
+      "invalid_group_policy": "Check the group thresholds and non-negative durations.",
+      "incomplete_sources": "Select total load, battery SOC, battery power and grid availability.",
+      "invalid_identifier": "Enter a group name between 1 and 255 characters.",
+      "group_storage_error": "Could not load or save the group. Existing settings are preserved.",
+      "already_configured": "This air conditioner already has a Solar Climate Manager entry."
     },
     "abort": {
-      "already_configured": "This climate entity is already configured."
+      "already_configured": "This climate entity is already configured.",
+      "reconfigure_successful": "Bindings updated; device identity and mode preserved."
     }
   },
   "options": {
@@ -38,7 +61,8 @@
           "sources": "Data sources",
           "comfort": "Comfort",
           "energy": "Energy",
-          "advanced": "Advanced"
+          "advanced": "Advanced",
+          "group": "Energy group"
         }
       },
       "sources": {
@@ -61,7 +85,7 @@
           "load_includes_battery_charging": "Total consumption includes battery charging",
           "grid_import_limit_entity": "Inverter grid import limit (number, optional; 0 = unlimited)"
         },
-        "description": "Other settings and operation mode are preserved. The optional number import limit uses its W/kW unit automatically. A positive limit also requires an actual grid import/export power sensor."
+        "description": "Other settings and operation mode are preserved. The optional number import limit uses its W/kW unit automatically. A positive limit also requires an actual grid import/export power sensor. Group members see only individual settings here; shared settings are under Energy group."
       },
       "comfort": {
         "title": "Comfort",
@@ -83,7 +107,7 @@
           "minimum_soc": "Charge level for stopping (%)",
           "restart_soc": "Charge level for resuming operation (%)"
         },
-        "description": "With grid available, low SOC allows operation if the import budget is sufficient and the battery is not materially discharging. Off-grid, minimum SOC is a hard limit."
+        "description": "With grid available, low SOC allows operation if the import budget is sufficient and the battery is not materially discharging. Off-grid, minimum SOC is a hard limit. Group members see only individual settings here; shared settings are under Energy group."
       },
       "advanced": {
         "title": "Advanced",
@@ -91,6 +115,89 @@
           "grid_absence_minutes": "Grid absence duration (minutes)"
         },
         "description": "Other technical settings are fixed: balance is assessed over 10 minutes; short load spikes are tolerated."
+      },
+      "group": {
+        "title": "Energy group",
+        "menu_options": {
+          "group_create": "Create group",
+          "group_join": "Join group",
+          "group_member": "Name and priority",
+          "group_sources": "Shared sources",
+          "group_policy": "Group policy",
+          "group_leave": "Leave group",
+          "group_delete": "Delete empty group"
+        },
+        "description": "A group allocates one shared energy budget. Device modes are preserved. Individual AC power meters are needed to reconcile starts automatically."
+      },
+      "group_create": {
+        "title": "Create group",
+        "data": {
+          "name": "Group name",
+          "priority": "Priority (larger wins)"
+        },
+        "description": "Group changes apply to all members. Device mode is preserved."
+      },
+      "group_member": {
+        "title": "Name and priority",
+        "data": {
+          "name": "Group name",
+          "priority": "Priority (larger wins)"
+        },
+        "description": "Group changes apply to all members. Device mode is preserved."
+      },
+      "group_join": {
+        "title": "Join group",
+        "data": {
+          "group_id": "Group",
+          "priority": "Priority (larger wins)"
+        },
+        "description": "Saving explicitly joins this device to the group. Shared energy sources and policy replace local energy settings; comfort and schedule stay individual."
+      },
+      "group_leave": {
+        "title": "Leave group",
+        "description": "Confirm leaving. The device retains its mode and returns to its local energy settings. Unresolved reservations block leaving."
+      },
+      "group_delete": {
+        "title": "Delete empty group",
+        "description": "Only an empty group without reservations can be deleted. Devices are not deleted.",
+        "data": {
+          "group_id": "Empty group"
+        }
+      },
+      "group_sources": {
+        "title": "Shared sources",
+        "data": {
+          "pv_power_entity": "Actual PV power sensor",
+          "forecast_power_now_entity": "Forecast power now sensor",
+          "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
+          "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
+          "load_power_entity": "Total consumption power sensor",
+          "soc_entity": "Battery SOC sensor (%)",
+          "battery_power_entity": "Signed battery power sensor",
+          "grid_power_entity": "Signed grid import/export power sensor",
+          "grid_available_entity": "Grid availability binary sensor",
+          "grid_on_means_available": "Grid binary sensor ON means available",
+          "battery_positive": "Positive battery power means",
+          "grid_positive": "Positive grid power means",
+          "load_includes_battery_charging": "Total consumption includes battery charging",
+          "grid_import_limit_entity": "Inverter grid import limit (number, optional; 0 = unlimited)",
+          "load_scope": "Total meter coverage"
+        },
+        "description": "The total meter must include all group ACs or exclude all of them. Partial coverage is unsupported. Off-grid operation needs PV; an import limit needs grid power."
+      },
+      "group_policy": {
+        "title": "Group policy",
+        "data": {
+          "minimum_soc": "Charge for stopping (%)",
+          "restart_soc": "Charge for resuming (%)",
+          "max_battery_discharge": "Allowed battery discharge at low SOC (W)",
+          "start_delay": "Stable budget before start (s)",
+          "shortage_delay": "Deficit duration before shedding (s)",
+          "grid_absence_delay": "Grid absence before overriding minimum run (s)",
+          "power_max_data_age": "Maximum power report age (s)",
+          "grid_max_data_age": "Maximum grid availability report age (s)"
+        },
+        "description": "Policy is shared by all members. At most one new start awaits confirmation at a time."
       }
     },
     "error": {
@@ -102,7 +209,26 @@
       "invalid_energy_source": "Select an existing sensor with the expected domain and units (SOC in %).",
       "invalid_target": "Target temperature is outside the air conditioner’s supported range.",
       "unsupported_temperature": "This climate entity does not support a single target temperature.",
-      "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device."
+      "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device.",
+      "switch_to_observation": "Switch affected devices from Control to Observation or Disabled before changing their bindings or group configuration.",
+      "unresolved_reservation": "An unresolved power reservation prevents this change. Wait for physical and meter confirmation; do not erase the reservation.",
+      "command_in_progress": "Wait for the active command and its physical confirmation.",
+      "missing_group": "The selected group no longer exists.",
+      "device_already_grouped": "This device already belongs to a group. Leave it before joining another.",
+      "group_has_members": "Only an empty group can be deleted.",
+      "configuration_changed": "Configuration changed while this form was open. Reopen the form.",
+      "invalid_priority": "Priority must be a non-negative whole number.",
+      "invalid_group_policy": "Check the group thresholds and non-negative durations.",
+      "incomplete_sources": "Select total load, battery SOC, battery power and grid availability.",
+      "invalid_identifier": "Enter a group name between 1 and 255 characters.",
+      "group_storage_error": "Could not load or save the group. Existing settings are preserved.",
+      "already_configured": "This air conditioner already has a Solar Climate Manager entry."
+    },
+    "abort": {
+      "group_store_unavailable": "Group storage is unavailable. Restore it and reload the integration.",
+      "no_groups": "No groups exist yet. Create one first.",
+      "no_empty_groups": "There are no empty groups to delete.",
+      "configuration_changed": "Configuration changed while this form was open. Reopen the form."
     }
   },
   "selector": {
@@ -122,6 +248,12 @@
       "options": {
         "import": "Import",
         "export": "Export"
+      }
+    },
+    "load_scope": {
+      "options": {
+        "includes_all_members": "Includes every group AC",
+        "excludes_all_members": "Excludes every group AC"
       }
     }
   },
@@ -288,6 +420,87 @@
       },
       "grid_import_margin": {
         "name": "Grid import headroom"
+      },
+      "group_name": {
+        "name": "Energy group"
+      },
+      "group_available_power": {
+        "name": "Group available power"
+      },
+      "group_load_power": {
+        "name": "Group total load"
+      },
+      "group_reserved_power": {
+        "name": "Group committed reserve"
+      },
+      "group_action": {
+        "name": "Group decision",
+        "state": {
+          "independent": "Independent",
+          "start": "Start",
+          "continue": "Continue",
+          "stop": "Stop",
+          "wait": "Wait",
+          "preview_start": "Preview start",
+          "preview_continue": "Preview continue",
+          "preview_stop": "Preview stop",
+          "preview_wait": "Preview wait"
+        }
+      },
+      "group_reason": {
+        "name": "Group decision reason",
+        "state": {
+          "independent": "Independent",
+          "group_not_ready": "Group not ready",
+          "group_store_unavailable": "Group store unavailable",
+          "group_storage_error": "Group storage error",
+          "missing_group": "Missing group",
+          "solar_ready": "Solar ready",
+          "grid_ready": "Grid ready",
+          "invalid_energy_data": "Invalid energy data",
+          "low_soc": "Low soc",
+          "soc_recovery": "Soc recovery",
+          "battery_discharge": "Battery discharge",
+          "incomplete_members": "Incomplete members",
+          "invalid_load": "Invalid load",
+          "inconsistent_load": "Inconsistent load",
+          "grid_limit_unavailable": "Grid limit unavailable",
+          "grid_power_unavailable": "Grid power unavailable",
+          "invalid_solar_data": "Invalid solar data",
+          "grid_import_limit": "Grid import limit",
+          "outage_deficit": "Outage deficit",
+          "invalid_temperature": "Invalid temperature",
+          "outside_schedule": "Outside schedule",
+          "no_temperature_demand": "No temperature demand",
+          "minimum_run": "Minimum run",
+          "running": "Running",
+          "device_unavailable": "Device unavailable",
+          "command_unconfirmed": "Command unconfirmed",
+          "unresolved_reservation": "Unresolved reservation",
+          "telemetry_unsettled": "Telemetry unsettled",
+          "insufficient_budget": "Insufficient budget",
+          "minimum_off": "Minimum off",
+          "start_confirmation": "Start confirmation",
+          "observation": "Observation",
+          "disabled": "Disabled",
+          "temporary_block": "Temporary block",
+          "awaiting_previous_start": "Awaiting previous start",
+          "higher_priority": "Higher priority",
+          "recovering_command": "Recovering command"
+        }
+      },
+      "group_command_status": {
+        "name": "Group command confirmation",
+        "state": {
+          "idle": "Idle",
+          "service_pending": "Service pending",
+          "awaiting_confirmation": "Awaiting confirmation",
+          "awaiting_meter": "Awaiting meter",
+          "awaiting_stop": "Awaiting stop",
+          "uncertain": "Uncertain",
+          "confirmed": "Confirmed",
+          "failed": "Failed"
+        }
       }
     },
     "binary_sensor": {

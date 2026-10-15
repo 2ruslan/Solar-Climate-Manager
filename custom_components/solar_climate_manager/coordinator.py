@@ -116,6 +116,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 settings["operation_mode"] == "control" and sources.climate_valid and not manual
             ),
         )
+        if self.group_manager is not None:
+            data.update(self.group_manager.public_state(self))
         if stored_before != self._stored_state():
             self.store.async_delay_save(self._stored_state, 1)
         if self.data != data:

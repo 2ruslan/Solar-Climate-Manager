@@ -5,10 +5,12 @@ from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTemperature, Unit
 
 from .const import POWER_SOURCES
 from .entity import SolarClimateEntity
+from .group_presentation import COMMAND_PHASES, GROUP_ACTIONS, GROUP_REASONS
 from .settings import OPERATION_MODES
 from .strategy import ACTIONS, REASONS
 
 POWER_KEYS = [
+    "group_available_power", "group_load_power", "group_reserved_power",
     *POWER_SOURCES,
     "load_power",
     "house_load_power",
@@ -31,6 +33,9 @@ TEMPERATURE_KEYS = [
 ]
 DURATION_KEYS = ["seconds_to_start", "seconds_to_stop"]
 ENUM_OPTIONS = {
+    "group_action": GROUP_ACTIONS,
+    "group_reason": GROUP_REASONS,
+    "group_command_status": COMMAND_PHASES,
     "automation_mode": list(OPERATION_MODES),
     "reason": ["invalid_data", "disabled", "temperature_demand", "temperature_satisfied"],
     "strategy_action": ACTIONS,
@@ -48,7 +53,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(
         [
             SolarClimateSensor(entry.runtime_data, key)
-            for key in (*TEMPERATURE_KEYS, *ENUM_OPTIONS, *POWER_KEYS, *DURATION_KEYS, "soc")
+            for key in (*TEMPERATURE_KEYS, *ENUM_OPTIONS, *POWER_KEYS, *DURATION_KEYS, "soc", "group_name")
         ]
     )
 
@@ -71,13 +76,13 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
         elif key == "soc":
             self._attr_device_class = SensorDeviceClass.BATTERY
             self._attr_native_unit_of_measurement = PERCENTAGE
-        else:
+        elif key in ENUM_OPTIONS:
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = ENUM_OPTIONS[key]
 
     @property
     def native_value(self):
-        return self.coordinator.data[self.key]
+        return self.coordinator.data.get(self.key)
 
     @property
     def available(self):
@@ -87,6 +92,13 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        if self.key == "group_action":
+            manager = self.coordinator.group_manager
+            registry = manager.repository.registry if manager else None
+            member = registry.membership(self.coordinator.device_id) if registry else None
+            return {"group_id": member.group_id if member else None, "priority": member.priority if member else None,
+                    "preview": str(self.native_value).startswith("preview_"),
+                    "budget_kind": "grid" if manager and member and manager.snapshots.get(member.group_id) and manager.snapshots[member.group_id].energy.grid else "solar"}
         if self.key == "strategy_action":
             return {
                 "target_temperature_c": self.coordinator.settings["target_temperature"],

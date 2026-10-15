@@ -60,7 +60,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_menu_and_separate_advanced_form(self):
         result = await self.flow.async_step_init()
-        self.assertEqual(result["menu_options"], ["sources", "comfort", "energy", "advanced"])
+        self.assertEqual(result["menu_options"], ["sources", "comfort", "energy", "advanced", "group"])
         advanced = await self.flow.async_step_advanced()
         self.assertEqual(set(advanced["data_schema"].schema), {"grid_absence_minutes"})
         energy = await self.flow.async_step_energy()

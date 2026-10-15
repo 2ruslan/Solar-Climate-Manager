@@ -24,6 +24,7 @@ from ..domain.allocator import (
     reconcile,
 )
 from ..domain.groups import GroupConfig, GroupRegistry, UnresolvedReservation
+from ..group_presentation import group_metrics
 from ..manual import control_fingerprint, pause_active
 
 LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ class GroupManager:
         self.configs: dict[str, Any] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         self.results: dict[str, GroupAllocation] = {}
+        self.snapshots: dict[str, GroupSnapshot] = {}
+        self.mutating_devices: set[str] = set()
         self.issued: set[str] = set()
         self.stop_times: dict[str, float] = {}
         self.task: asyncio.Task[None] | None = None
@@ -107,13 +110,19 @@ class GroupManager:
                 self.task = None
             self.states.clear()
             self.configs.clear()
+            self.snapshots.clear()
+            self.results.clear()
         else:
             self.request_evaluation()
 
     def controls(self, device_id: str) -> bool:
         registry = self.repository.registry
         # Unknown membership cannot fall back to the standalone start path.
-        return registry is None or registry.membership(device_id) is not None
+        return (
+            device_id in self.mutating_devices
+            or registry is None
+            or registry.membership(device_id) is not None
+        )
 
     def has_pending(self, device_id: str) -> bool:
         registry = self.repository.registry
@@ -199,6 +208,7 @@ class GroupManager:
         # Proposals are not commitments until async_authorize saves one.
         self.states[group.group_id] = replace(result.state, reservations=previous.reservations)
         self.results[group.group_id] = result
+        self.snapshots[group.group_id] = snapshot
         return snapshot, result
 
     def _desired(
@@ -249,6 +259,8 @@ class GroupManager:
         return None
 
     def desired(self, device_id: str) -> bool | None:
+        if device_id in self.mutating_devices:
+            return None
         registry = self.repository.registry
         member = registry.membership(device_id) if registry else None
         if registry is None or member is None:
@@ -311,8 +323,16 @@ class GroupManager:
                         except (ValueError, OSError, HomeAssistantError):
                             self.error = "group_storage_error"
                             LOGGER.exception("Group evaluation or persistence failed")
+                observers = {
+                    c.group_observer for c in self.devices.values() if c.group_observer is not None
+                }
+                for observer in observers:
+                    observer.evaluate()
                 for coordinator in tuple(self.devices.values()):
                     if coordinator.data and not coordinator.commands.closed:
+                        coordinator.async_set_updated_data(
+                            {**coordinator.data, **self.public_state(coordinator)}
+                        )
                         coordinator.commands.schedule()
         finally:
             self.task = None
@@ -348,6 +368,8 @@ class GroupManager:
     async def async_authorize(
         self, device_id: str, service: str, payload: dict[str, Any], expected_climate: Any
     ) -> DispatchTicket | None:
+        if device_id in self.mutating_devices:
+            return None
         registry = self.repository.registry
         member = registry.membership(device_id) if registry else None
         if registry is None or member is None:
@@ -430,7 +452,11 @@ class GroupManager:
             unchanged = climate is not None and control_fingerprint(
                 climate.state, climate.attributes
             ) == control_fingerprint(expected_climate.state, expected_climate.attributes)
-            valid = unchanged and (actual, members, dict(coordinator.settings)) == signature
+            valid = (
+                device_id not in self.mutating_devices
+                and unchanged
+                and (actual, members, dict(coordinator.settings)) == signature
+            )
             if actual is not None:
                 fresh, proposal = self._compute(
                     actual, current, ignore=inserted.command_id if inserted else None
@@ -481,6 +507,97 @@ class GroupManager:
                 LOGGER.exception("Unable to persist uncertain group command")
         self.request_evaluation()
 
+    def public_state(self, coordinator: Any) -> dict[str, Any]:
+        device_id = coordinator.device_id
+        registry = self.repository.registry
+        member = registry.membership(device_id) if registry else None
+        data: dict[str, Any] = {
+            "group_name": None,
+            "group_available_power": None,
+            "group_load_power": None,
+            "group_reserved_power": None,
+            "group_action": "independent",
+            "group_reason": "independent",
+            "group_command_status": "idle",
+        }
+        if registry is None:
+            data.update(group_action="wait", group_reason="group_store_unavailable")
+            return data
+        if member is None:
+            if device_id in self.mutating_devices:
+                data.update(group_action="wait", group_reason="group_not_ready")
+            return data
+        group = registry.group(member.group_id)
+        data.update(
+            group_action="wait",
+            group_reason="missing_group" if group is None else "group_not_ready",
+        )
+        if group is None:
+            return data
+        data["group_name"] = group.name[:255]
+        result = self.results.get(group.group_id)
+        snapshot = self.snapshots.get(group.group_id)
+        if result is not None and snapshot is not None:
+            data.update(group_metrics(snapshot, result, group.policy))
+            decision = next((d for d in result.decisions if d.device_id == device_id), None)
+            if decision:
+                data.update(group_action=decision.action, group_reason=decision.reason)
+                desired = self._desired(device_id, snapshot, result, registry)
+                if decision.action == "start" and desired is None:
+                    data.update(
+                        group_action="wait",
+                        group_reason="awaiting_previous_start"
+                        if any(r.group_id == group.group_id for r in registry.unresolved)
+                        else "higher_priority",
+                    )
+                elif desired is False and decision.action != "stop":
+                    data.update(group_action="stop", group_reason="recovering_command")
+                if coordinator.settings["operation_mode"] == "observation":
+                    observer = coordinator.group_observer
+                    preview = observer.diagnostics(device_id) if observer else None
+                    proposed = next(
+                        (
+                            d
+                            for d in (preview or {}).get("decisions", [])
+                            if d["device_id"] == device_id
+                        ),
+                        None,
+                    )
+                    if proposed:
+                        data.update(
+                            group_action="preview_" + proposed["action"],
+                            group_reason=proposed["reason"],
+                        )
+        reserve = next((r for r in registry.unresolved if r.device_id == device_id), None)
+        attempt = coordinator.commands.state.attempt
+        if reserve:
+            data["group_command_status"] = (
+                "awaiting_stop"
+                if device_id in self.stop_times
+                else "uncertain"
+                if reserve.phase == "uncertain" or reserve.command_id not in self.issued
+                else "service_pending"
+                if attempt and attempt.service_status == "pending"
+                else "awaiting_meter"
+                if attempt and attempt.confirmed_at is not None
+                else "awaiting_confirmation"
+            )
+        elif attempt:
+            data["group_command_status"] = (
+                "confirmed"
+                if attempt.confirmed_at is not None
+                else "service_pending"
+                if attempt.service_status == "pending"
+                else "failed"
+                if attempt.service_status in ("failed", "cancelled")
+                else "awaiting_confirmation"
+            )
+        if device_id in self.mutating_devices:
+            data.update(group_action="wait", group_reason="group_not_ready")
+        if self.error:
+            data["group_reason"] = self.error
+        return data
+
     def diagnostics(self, device_id: str) -> dict[str, Any] | None:
         registry = self.repository.registry
         member = registry.membership(device_id) if registry else None
@@ -491,6 +608,13 @@ class GroupManager:
         result = self.results.get(member.group_id)
         return {
             "shadow": False,
+            "public_state": {
+                k: v
+                for k, v in self.public_state(self.devices[device_id]).items()
+                if k != "group_name"
+            }
+            if device_id in self.devices
+            else None,
             "reason": self.error or (result.reason if result else "group_not_ready"),
             "reservations": [
                 asdict(r) for r in registry.unresolved if r.group_id == member.group_id

@@ -37,3 +37,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     hass.config_entries.async_update_entry(entry, data=data, version=CONFIG_VERSION)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Detach a removed entry only when no unresolved commitment can be lost."""
+    from .adapters.groups import get_group_repository
+
+    repository = get_group_repository(hass)
+    identity = entry.data.get("device_id", entry.entry_id)
+    await repository.async_update(lambda state: state if any(
+        r.device_id == identity for r in state.unresolved) else state.leave(identity))

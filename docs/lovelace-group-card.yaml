@@ -1,0 +1,36 @@
+# Підставте сутності відповідних записів через сторінку пристрою.
+# Метрики групи достатньо показувати з одного учасника — не підсумовуйте їх.
+type: vertical-stack
+cards:
+  - type: entities
+    title: Спільний енергетичний бюджет
+    entities:
+      - entity: sensor.scm_one_group_name
+        name: Група
+      - entity: sensor.scm_one_group_load_power
+        name: Поточне навантаження без заряджання
+      - entity: sensor.scm_one_group_available_power
+        name: Доступний бюджет
+      - entity: sensor.scm_one_group_reserved_power
+        name: Реальний неврегульований резерв
+  - type: entities
+    title: Кондиціонер 1
+    entities:
+      - select.scm_one_operation_mode
+      - sensor.scm_one_group_action
+      - sensor.scm_one_group_reason
+      - sensor.scm_one_group_command_status
+  - type: entities
+    title: Кондиціонер 2
+    entities:
+      - select.scm_two_operation_mode
+      - sensor.scm_two_group_action
+      - sensor.scm_two_group_reason
+      - sensor.scm_two_group_command_status
+  - type: history-graph
+    title: Потужність групи
+    hours_to_show: 6
+    entities:
+      - sensor.scm_one_group_load_power
+      - sensor.scm_one_group_reserved_power
+      - sensor.scm_one_group_available_power

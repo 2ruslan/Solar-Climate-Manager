@@ -1,135 +1,24 @@
 """Short section-based configuration; hidden settings survive section edits."""
 
+from dataclasses import asdict
 from uuid import uuid4
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.exceptions import HomeAssistantError
 
+from .adapters.groups import get_group_repository
 from .adapters.migrations import CONFIG_VERSION
-from .climate_control import normalized_target
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
+from .flow_helpers import SOURCE_KEYS, settings_schema, validate
+from .group_flow import GroupOptionsMixin, ensure_editable, flow_error
 from .settings import (
     ADVANCED_KEYS,
     COMFORT_KEYS,
     ENERGY_KEYS,
-    NUMERIC_SETTINGS,
-    SOURCE_FLAGS,
     configuration_values,
     merge_section,
-    valid_policy,
 )
-
-try:
-    import probatio as vol
-except ImportError:
-    import voluptuous as vol
-
-MAIN_NUMBERS = {
-    "target_temperature": (5, 35, 0.5, "°C"),
-    "hysteresis": (0.1, 5, 0.1, "°C"),
-    **NUMERIC_SETTINGS,
-}
-SOURCE_KEYS = (set(OPTIONAL_SOURCES) - {"schedule_entity"}) | SOURCE_FLAGS
-
-
-def settings_schema(values, keys):
-    fields = {}
-    for key in sorted(keys):
-        if key in MAIN_NUMBERS:
-            minimum, maximum, step, unit = MAIN_NUMBERS[key]
-            fields[vol.Required(key, default=values[key])] = selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=minimum,
-                    max=maximum,
-                    step=step,
-                    unit_of_measurement=unit,
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            )
-        elif key in OPTIONAL_SOURCES or key in ("temperature_entity", "climate_entity"):
-            domain = (
-                "number"
-                if key == "grid_import_limit_entity"
-                else "binary_sensor"
-                if key == "grid_available_entity"
-                else "schedule"
-                if key == "schedule_entity"
-                else "climate"
-                if key == "climate_entity"
-                else "sensor"
-            )
-            config = {"domain": domain}
-            if key == "temperature_entity":
-                config["device_class"] = "temperature"
-            marker = (
-                vol.Required(key)
-                if key in ("temperature_entity", "climate_entity")
-                else vol.Optional(key)
-            )
-            fields[marker] = selector.EntitySelector(selector.EntitySelectorConfig(**config))
-        elif key in ("hvac_mode", "battery_positive", "grid_positive"):
-            choices = {
-                "hvac_mode": ["heat", "cool"],
-                "battery_positive": ["charge", "discharge"],
-                "grid_positive": ["import", "export"],
-            }[key]
-            fields[vol.Required(key, default=values[key])] = selector.SelectSelector(
-                selector.SelectSelectorConfig(options=choices, translation_key=key)
-            )
-        else:
-            fields[vol.Required(key, default=values[key])] = selector.BooleanSelector()
-    return vol.Schema(fields)
-
-
-def validate(hass, data):
-    climate = hass.states.get(data["climate_entity"])
-    temperature = hass.states.get(data["temperature_entity"])
-    if climate is None or not data["climate_entity"].startswith("climate."):
-        return "invalid_climate"
-    if data["hvac_mode"] not in climate.attributes.get("hvac_modes", []):
-        return "unsupported_mode"
-    if (
-        temperature is None
-        or not data["temperature_entity"].startswith("sensor.")
-        or temperature.attributes.get("unit_of_measurement") not in ("°C", "°F")
-    ):
-        return "invalid_temperature"
-    try:
-        normalized_target(
-            data["target_temperature"], climate.attributes, hass.config.units.temperature_unit
-        )
-        normalized_target(
-            data["target_temperature"], climate.attributes,
-            hass.config.units.temperature_unit, clamp=True,
-            bounds_c=(data["ac_min_temperature"], data["ac_max_temperature"]),
-        )
-    except ValueError as error:
-        return str(error)
-    if not valid_policy(data):
-        return "invalid_soc_thresholds"
-    for key in OPTIONAL_SOURCES:
-        entity_id = data.get(key)
-        if not entity_id:
-            continue
-        state = hass.states.get(entity_id)
-        domain = (
-            "number"
-            if key == "grid_import_limit_entity"
-            else "binary_sensor"
-            if key == "grid_available_entity"
-            else "schedule"
-            if key == "schedule_entity"
-            else "sensor"
-        )
-        unit = "%" if key == "soc_entity" else "power" if domain in ("sensor", "number") else None
-        if state is None or not entity_id.startswith(f"{domain}."):
-            return "invalid_energy_source"
-        if unit == "power" and state.attributes.get("unit_of_measurement") not in ("W", "kW"):
-            return "invalid_power"
-        if unit == "%" and state.attributes.get("unit_of_measurement") != "%":
-            return "invalid_energy_source"
-    return None
 
 
 class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -143,7 +32,9 @@ class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if error is None:
                 await self.async_set_unique_id(values["climate_entity"])
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=values["climate_entity"], data={**values, "device_id": uuid4().hex})
+                return self.async_create_entry(
+                    title=values["climate_entity"], data={**values, "device_id": uuid4().hex}
+                )
             errors["base"] = error
         keys = (COMFORT_KEYS - {"schedule_entity"}) | {"climate_entity"}
         schema = settings_schema(DEFAULTS, keys)
@@ -153,22 +44,84 @@ class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reconfigure(self, user_input=None):
+        entry = self._get_reconfigure_entry()
+        values = configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS)
+        errors = {}
+        if user_input is not None:
+            merged = {**values, **user_input}
+            error = None
+            try:
+                registry = await get_group_repository(self.hass).async_load()
+                identity = entry.data.get("device_id", entry.entry_id)
+                ensure_editable(self.hass, registry, {identity})
+                member = registry.membership(identity)
+                group = registry.group(member.group_id) if member else None
+                validation_values = (
+                    {**merged, **asdict(group.sources), **asdict(group.policy)} if group else merged
+                )
+                error = validate(self.hass, validation_values)
+            except (ValueError, OSError, HomeAssistantError) as failure:
+                error = flow_error(failure)
+            if error is None:
+                for other in self._async_current_entries():
+                    effective = {**other.data, **other.options}
+                    if (
+                        other.entry_id != entry.entry_id
+                        and effective.get("climate_entity") == merged["climate_entity"]
+                    ):
+                        error = "already_configured"
+                        break
+            if error is None:
+                updates = {
+                    key: merged[key]
+                    for key in ("climate_entity", "temperature_entity", "hvac_mode")
+                }
+                manager = self.hass.data.get(f"{DOMAIN}.group_manager")
+                if manager:
+                    manager.mutating_devices.add(identity)
+                try:
+                    self.hass.config_entries.async_update_entry(
+                        entry,
+                        data={**entry.data, **updates},
+                        options={**entry.options, **updates},
+                        unique_id=merged["climate_entity"],
+                        title=merged["climate_entity"],
+                    )
+                    await self.hass.config_entries.async_reload(entry.entry_id)
+                finally:
+                    if manager:
+                        manager.mutating_devices.discard(identity)
+                        manager.request_evaluation()
+                return self.async_abort(reason="reconfigure_successful")
+            errors["base"] = error
+            values = merged
+        return self.async_show_form(
+            step_id="reconfigure",
+            errors=errors,
+            data_schema=self.add_suggested_values_to_schema(
+                settings_schema(values, {"climate_entity", "temperature_entity", "hvac_mode"}),
+                values,
+            ),
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
         return SolarClimateOptionsFlow()
 
 
-class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
+class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithReload):
     def values(self):
         return configuration_values(
             self.config_entry.data, self.config_entry.options, DEFAULTS, REMOVED_SETTINGS
         )
 
     async def async_step_init(self, user_input=None):
-        return self.async_show_menu(
-            step_id="init", menu_options=["sources", "comfort", "energy", "advanced"]
-        )
+        choices = ["sources", "comfort", "energy"]
+        if self.cached_membership() is None:
+            choices.append("advanced")
+        return self.async_show_menu(step_id="init", menu_options=[*choices, "group"])
 
     def form(self, step, keys, values, errors=None):
         schema = settings_schema(values, keys)
@@ -183,6 +136,12 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def section(self, step, keys, user_input):
         values = self.values()
+        member = self.cached_membership()
+        if member:
+            if step == "sources":
+                keys = {"ac_power_entity"}
+            elif step == "energy":
+                keys = {"estimated_ac_power"}
         if user_input is not None:
             merged = merge_section(
                 values,
@@ -190,7 +149,29 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
                 clear_sources=keys & set(OPTIONAL_SOURCES),
                 removed=REMOVED_SETTINGS,
             )
-            error = validate(self.hass, merged)
+            validation_values = merged
+            error = None
+            if member:
+                registry = await self._registry()
+                group = registry.group(member.group_id)
+                if group:
+                    validation_values = {**merged, **asdict(group.sources), **asdict(group.policy)}
+                if any(
+                    merged.get(key) != values.get(key)
+                    for key in ("ac_power_entity", "temperature_entity")
+                ):
+                    try:
+                        recovery = (
+                            values.get("ac_power_entity") is None
+                            and merged.get("ac_power_entity") is not None
+                            and merged.get("temperature_entity") == values.get("temperature_entity")
+                        )
+                        ensure_editable(
+                            self.hass, registry, {self.device_id}, allow_meter_recovery=recovery
+                        )
+                    except ValueError as failure:
+                        error = flow_error(failure)
+            error = error or validate(self.hass, validation_values)
             if error is None:
                 return self.async_create_entry(title="", data=merged)
             return self.form(step, keys, merged, {"base": error})
@@ -203,6 +184,8 @@ class SolarClimateOptionsFlow(config_entries.OptionsFlowWithReload):
         return await self.section("comfort", COMFORT_KEYS, user_input)
 
     async def async_step_advanced(self, user_input=None):
+        if self.cached_membership():
+            return await self.async_step_group_policy(user_input)
         return await self.section("advanced", ADVANCED_KEYS, user_input)
 
     async def async_step_energy(self, user_input=None):
