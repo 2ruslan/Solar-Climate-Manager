@@ -8,10 +8,11 @@ from datetime import timedelta
 from homeassistant.core import Context, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
+from .adapters.sources import climate_temperature, read_sources
+from .adapters.storage import create_store, demand_signature, restore_runtime, stored_state
 from .climate_control import (
     ACKNOWLEDGEMENT_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
@@ -23,28 +24,21 @@ from .climate_control import (
     normalized_target,
     temperature_matches,
 )
-from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, POWER_SOURCES, REMOVED_SETTINGS
+from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .domain.types import (
     CommandState,
     ControlIntent,
     DeviceConfig,
     EnergyPolicyConfig,
-    EnergySnapshot,
     ExpectedUpdate,
     ObservedDeviceState,
     PolicyState,
 )
 from .manual import control_fingerprint, pause_active
-from .model import evaluate, is_fresh, temperature_celsius
-from .power import power_watts, read_power, signed_power_watts, soc_percent
-from .settings import BASE_MODES, OPERATION_MODES, configuration_values
-from .strategy import (
-    decide,
-    house_load_power,
-    restore,
-    serialize,
-    valid_timestamp,
-)
+from .model import evaluate
+from .presentation import build_state
+from .settings import OPERATION_MODES, configuration_values
+from .strategy import decide
 
 LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +52,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.settings = configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS)
         self.settings.pop("temporary_previous_mode", None)
         self.settings.pop("temporary_block_date", None)
-        self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
+        self.store = create_store(hass, entry.entry_id)
         self.demand = False
         self.signature = None
         self.observed = ObservedDeviceState()
@@ -73,31 +67,16 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.policy_signature = dict(self.settings)
 
     async def async_initialize(self):
-        saved = await self.store.async_load() or {}
-        self.signature = self._signature()
-        if saved.get("signature") == self.signature:
-            self.demand = saved.get("demand") is True
-        self.manual_date = saved.get("manual_date")
-        if self.settings["operation_mode"] == "temporary_block":
-            self.manual_date = self.entry.options.get("temporary_block_date", self.manual_date)
-            previous = self.entry.options.get("temporary_previous_mode")
-            self.previous_mode = previous if previous in BASE_MODES else "observation"
-        if saved.get("policy_signature") == self.policy_signature:
-            self.observed, self.policy = restore(
-                saved.get("control"), dt_util.utcnow().timestamp()
-            )
-        elif isinstance(saved.get("control"), dict):
-            previous = saved.get("control")
-            self.policy.soc_blocked = previous.get("soc_blocked") is True
-            now = dt_util.utcnow().timestamp()
-            self.observed = replace(
-                self.observed,
-                last_stop=(
-                    now
-                    if previous.get("running") is True
-                    else valid_timestamp(previous.get("last_stop"), now)
-                ),
-            )
+        self.signature = demand_signature(self.settings)
+        restored = restore_runtime(
+            await self.store.async_load(), settings=self.settings,
+            options=self.entry.options, now=dt_util.utcnow().timestamp(),
+        )
+        self.demand = restored.demand
+        self.manual_date = restored.manual_date
+        self.previous_mode = restored.previous_mode
+        self.observed = restored.observed
+        self.policy = restored.policy
         self.entry.async_on_unload(
             async_track_state_change_event(
                 self.hass,
@@ -111,18 +90,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         )
         self._evaluate()
 
-    def _signature(self):
-        return [
-            self.settings[key]
-            for key in (
-                "temperature_entity",
-                "hvac_mode",
-                "target_temperature",
-                "hysteresis",
-                "operation_mode",
-            )
-        ]
-
     async def async_shutdown(self):
         """Complete persistence before a replacement coordinator loads the store."""
         self.closed = True
@@ -130,13 +97,10 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         await self.store.async_save(self._stored_state())
 
     def _stored_state(self):
-        return {
-            "demand": self.demand,
-            "signature": self.signature,
-            "manual_date": self.manual_date,
-            "control": serialize(self.observed, self.policy),
-            "policy_signature": self.policy_signature,
-        }
+        return stored_state(
+            demand=self.demand, signature=self.signature, manual_date=self.manual_date,
+            observed=self.observed, policy=self.policy, policy_signature=self.policy_signature,
+        )
 
     @callback
     def _state_changed(self, event):
@@ -181,219 +145,38 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             self._set_operation_mode("temporary_block")
         elif self.manual_date and not manual:
             self.manual_date = None
-        state = self.hass.states.get(settings["temperature_entity"])
-        climate = self.hass.states.get(settings["climate_entity"])
-        temperature = (
-            temperature_celsius(state.state, state.attributes.get("unit_of_measurement"))
-            if state
-            else None
+        now = dt_util.utcnow()
+        sources = read_sources(
+            self.hass.states.get, settings, self.device,
+            self.hass.config.units.temperature_unit, now,
         )
-        climate_valid = (
-            climate is not None
-            and climate.state not in ("unknown", "unavailable")
-            and self.device.hvac_mode in climate.attributes.get("hvac_modes", [])
-        )
-        ac_temperature = (
-            temperature_celsius(
-                climate.attributes.get("current_temperature"),
-                climate.attributes.get("temperature_unit", self.hass.config.units.temperature_unit),
-            )
-            if climate_valid
-            else None
-        )
-        raw_target = compensated_target(self.device.target_temperature, temperature, ac_temperature)
-        ac_target = None
-        if raw_target is not None:
-            try:
-                command_target = normalized_target(
-                    raw_target,
-                    climate.attributes,
-                    self.hass.config.units.temperature_unit,
-                    clamp=True,
-                    bounds_c=(self.device.ac_min_temperature, self.device.ac_max_temperature),
-                )
-                ac_target = temperature_celsius(
-                    command_target, self.hass.config.units.temperature_unit
-                )
-            except ValueError:
-                pass
         decision = evaluate(
-            temperature,
+            sources.temperature,
             target=self.device.target_temperature,
             hysteresis=self.device.hysteresis,
             mode=self.device.hvac_mode,
             previous_demand=self.demand,
             enabled=settings["operation_mode"] != "disabled",
-            climate_valid=climate_valid and ac_target is not None,
+            climate_valid=sources.climate_valid and sources.ac_target_temperature is not None,
         )
-        if self.demand != decision.demand:
-            self.demand = decision.demand
-        data = {
-            "temperature": temperature,
-            "ac_temperature": ac_temperature,
-            "ac_set_temperature": temperature_celsius(
-                climate.attributes.get("temperature"),
-                climate.attributes.get("temperature_unit", self.hass.config.units.temperature_unit),
-            )
-            if climate_valid
-            else None,
-            "temperature_offset": (ac_temperature - temperature)
-            if ac_temperature is not None and temperature is not None
-            else None,
-            "ac_target_temperature": ac_target,
-            "demand": decision.demand,
-            "invalid_data": not decision.data_valid,
-            "reason": decision.reason,
-            "automation_mode": settings["operation_mode"],
-            "control_allowed": False,
-            "command_error": self.command.error,
-            "command_failed": self.command.error != "none",
-        }
-        now = dt_util.utcnow()
-        for key, source_key in POWER_SOURCES.items():
-            source_id = settings.get(source_key)
-            source = self.hass.states.get(source_id) if source_id else None
-            data[key] = (
-                (
-                    read_power(
-                        source.state,
-                        source.attributes.get("unit_of_measurement"),
-                        now=now,
-                        reported=source.last_reported,
-                        max_age=settings["power_max_data_age"],
-                    )
-                    if key == "pv_power"
-                    else power_watts(source.state, source.attributes.get("unit_of_measurement"))
-                )
-                if source
-                else None
-            )
-        for key in (
-            "load_power",
-            "battery_power",
-            "grid_power",
-            "soc",
-            "ac_power",
-        ):
-            data[key] = self._energy_value(f"{key}_entity", now, key)
-        if data["battery_power"] is not None and settings["battery_positive"] == "charge":
-            data["battery_power"] *= -1
-        if data["grid_power"] is not None and settings["grid_positive"] == "export":
-            data["grid_power"] *= -1
-        measured_charge = (
-            max(0, -data["battery_power"]) if data["battery_power"] is not None else None
-        )
-        data["battery_charge_power"] = measured_charge
-        data["house_load_power"] = house_load_power(
-            data["load_power"], measured_charge, settings["load_includes_battery_charging"]
-        )
-        limit_id = settings.get("grid_import_limit_entity")
-        limit_state = self.hass.states.get(limit_id) if limit_id else None
-        # This is a setting, not a periodically reported measurement.
-        data["grid_import_limit"] = (
-            power_watts(limit_state.state, limit_state.attributes.get("unit_of_measurement"))
-            if limit_state
-            else None
-        )
-        limit_active = bool(limit_id) and data["grid_import_limit"] != 0
-        data["grid_import_limit_active"] = limit_active
-        grid = self._binary_value("grid_available_entity", now, settings["grid_max_data_age"])
-        if grid is not None and not settings["grid_on_means_available"]:
-            grid = not grid
-        schedule = (
-            self._binary_value("schedule_entity", now, None)
-            if settings.get("schedule_entity")
-            else True
-        )
-        actual_ac = data["ac_power"]
-        if actual_ac is None:
-            actual_ac = (
-                settings["estimated_ac_power"]
-                if climate and climate.attributes.get("hvac_action") in ("heating", "cooling")
-                else 0
-            )
-        ac_valid = (not settings.get("ac_power_entity") or data["ac_power"] is not None) and data[
-            "house_load_power"
-        ] is not None
-        forecast_keys = ("forecast_power_now", "forecast_power_30m", "forecast_power_60m")
-        forecasts = tuple(data[key] for key in forecast_keys)
-        snapshot = EnergySnapshot(
-            pv=data["pv_power"],
-            load=data["load_power"],
-            soc=data["soc"],
-            battery=data["battery_power"],
-            grid_power=data["grid_power"],
-            grid_import_limit=data["grid_import_limit"],
-            grid_limit_configured=limit_active,
-            grid=grid,
-            forecasts=forecasts,
-            actual_ac_power=actual_ac,
-            ac_power_valid=ac_valid,
-            temperature_valid=decision.data_valid,
-            schedule_allowed=schedule is True,
-        )
-        climate_available = climate is not None and climate.state not in ("unknown", "unavailable")
-        actual_running = climate.state != "off" if climate_available else self.observed.running
-        self.observed = self.observed.observe(actual_running, now.timestamp())
+        self.demand = decision.demand
+        if sources.running is not None:
+            self.observed = self.observed.observe(sources.running, now.timestamp())
         evaluation = decide(
-            snapshot,
-            self.observed,
-            self.policy,
-            energy_config,
-            now=now.timestamp(),
-            demand=decision.demand,
-            enabled=settings["operation_mode"] != "disabled",
-            manual=manual,
+            sources.energy, self.observed, self.policy, energy_config,
+            now=now.timestamp(), demand=decision.demand,
+            enabled=settings["operation_mode"] != "disabled", manual=manual,
         )
         self.policy = evaluation.policy
         strategy = evaluation.decision
         self.intent = strategy.intent
-        data.update(
-            {
-                "grid_available": grid,
-                "energy_allowed": strategy.energy_allowed,
-                "soc_blocked": self.policy.soc_blocked,
-                "energy_reason": strategy.energy_reason,
-                "grid_import_margin": strategy.grid_import_margin,
-                "running": actual_running if climate_available else None,
-                "strategy_action": strategy.action,
-                "strategy_reason": strategy.reason,
-                "solar_margin": strategy.solar_margin,
-                "average_solar_margin": strategy.average_solar_margin,
-                "forecast_margin": strategy.forecast_margin,
-                "seconds_to_start": round(strategy.seconds_to_start)
-                if strategy.seconds_to_start is not None
-                else None,
-                "seconds_to_stop": round(strategy.seconds_to_stop)
-                if strategy.seconds_to_stop is not None
-                else None,
-                "manual_pause": manual,
-                "manual_status": "disabled"
-                if settings["operation_mode"] == "disabled"
-                else "manual_today"
-                if manual
-                else "automatic",
-                "energy_data_invalid": (
-                    grid is True
-                    and limit_active
-                    and (data["grid_import_limit"] is None or data["grid_power"] is None)
-                )
-                or any(
-                    value is None
-                    for value in (
-                        data["soc"],
-                        data["battery_power"],
-                        grid,
-                    )
-                )
-                or (
-                    grid is False
-                    and (data["pv_power"] is None or data["load_power"] is None or not ac_valid)
-                ),
-            }
-        )
-        data["control_allowed"] = (
-            settings["operation_mode"] == "control" and climate_valid and not manual
+        data = build_state(
+            sources, decision, strategy, self.policy,
+            operation_mode=settings["operation_mode"], manual=manual,
+            command_error=self.command.error,
+            control_allowed=(
+                settings["operation_mode"] == "control" and sources.climate_valid and not manual
+            ),
         )
         if stored_before != self._stored_state():
             self.store.async_delay_save(self._stored_state, 1)
@@ -409,34 +192,6 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             self.command_task = self.entry.async_create_task(
                 self.hass, self._async_control(), "climate control", eager_start=False
             )
-
-    def _energy_value(self, source_key, now, kind):
-        entity_id = self.settings.get(source_key)
-        state = self.hass.states.get(entity_id) if entity_id else None
-        if state is None or not is_fresh(
-            now, state.last_reported, self.settings["power_max_data_age"]
-        ):
-            return None
-        unit = state.attributes.get("unit_of_measurement")
-        value = (
-            soc_percent(state.state, unit)
-            if kind == "soc"
-            else signed_power_watts(state.state, unit)
-        )
-        return (
-            value
-            if kind in ("battery_power", "grid_power", "soc") or value is not None and value >= 0
-            else None
-        )
-
-    def _binary_value(self, source_key, now, max_age):
-        entity_id = self.settings.get(source_key)
-        state = self.hass.states.get(entity_id) if entity_id else None
-        if state is None or state.state not in ("on", "off"):
-            return None
-        if max_age is not None and not is_fresh(now, state.last_reported, max_age):
-            return None
-        return state.state == "on"
 
     async def _cancel_command(self):
         if self.command_task is not None:
@@ -468,7 +223,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.device = replace(self.device, operation_mode=mode)
         self.command.last_command = None
         self.policy.window.clear()
-        self.signature = self._signature()
+        self.signature = demand_signature(self.settings)
         self.policy_signature = dict(self.settings)
         options["operation_mode"] = mode
         options.pop("enabled", None)
@@ -533,8 +288,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 self._set_command_error(str(error))
                 return None
             mode = self.device.hvac_mode
-            current_target = temperature_celsius(
-                climate.attributes.get("temperature"), self.hass.config.units.temperature_unit
+            current_target = climate_temperature(
+                climate, "temperature", self.hass.config.units.temperature_unit
             )
             current_valid = False
             if current_target is not None:

@@ -9,6 +9,7 @@ from test_strategy import policy
 
 models = importlib.import_module("scm_strategy_test.domain.types")
 settings = importlib.import_module("scm_strategy_test.settings")
+storage = importlib.import_module("scm_strategy_test.adapters.storage")
 
 
 class PolicyContractTests(unittest.TestCase):
@@ -31,7 +32,7 @@ class PolicyContractTests(unittest.TestCase):
         self.state = first.policy
         self.assertEqual(self.decide(1030).decision.action, "start")
         self.assertEqual(self.observed, policy.ObservedDeviceState())
-        saved = policy.serialize(self.observed, self.state)
+        saved = storage.serialize(self.observed, self.state)
         self.assertFalse(saved["running"])
         self.assertIsNone(saved["last_start"])
         self.observed = self.observed.observe(True, 1040)
@@ -79,13 +80,13 @@ class PolicyContractTests(unittest.TestCase):
             "soc_blocked": True, "surplus_since": 850, "deficit_since": 950,
             "grid_absent_since": 800,
         }
-        observed, state = policy.restore(legacy, 1000)
+        observed, state = storage.restore(legacy, 1000)
         self.assertEqual(observed, policy.ObservedDeviceState(True, 900, 100))
         self.assertTrue(state.soc_blocked)
         self.assertIsNone(state.deficit_since)
         self.assertIsNone(state.grid_absent_since)
         self.assertFalse(state.window.samples)
-        self.assertEqual(set(policy.serialize(observed, state)), set(legacy))
+        self.assertEqual(set(storage.serialize(observed, state)), set(legacy))
 
     def test_normalized_legacy_options_feed_typed_configuration(self):
         defaults = {

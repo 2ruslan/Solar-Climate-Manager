@@ -11,6 +11,7 @@ package = types.ModuleType("scm_strategy_test")
 package.__path__ = [str(Path(__file__).parents[2] / "custom_components/solar_climate_manager")]
 sys.modules[package.__name__] = package
 policy = importlib.import_module("scm_strategy_test.strategy")
+storage = importlib.import_module("scm_strategy_test.adapters.storage")
 
 
 class StrategyTests(unittest.TestCase):
@@ -116,10 +117,10 @@ class StrategyTests(unittest.TestCase):
 
     def test_soc_block_survives_restore_and_missing_measurement(self):
         self.decide(0, replace(self.snapshot, soc=84))
-        saved = policy.serialize(self.observed, self.state)
+        saved = storage.serialize(self.observed, self.state)
         self.observed = policy.ObservedDeviceState()
         self.state = policy.PolicyState()
-        self.observed, self.state = policy.restore(saved, 10)
+        self.observed, self.state = storage.restore(saved, 10)
         self.decide(10, replace(self.snapshot, soc=None))
         self.assertTrue(self.state.soc_blocked)
         self.assertEqual(self.decide(20, replace(self.snapshot, soc=89)).reason, "soc_recovery")
@@ -274,19 +275,19 @@ class StrategyTests(unittest.TestCase):
 
     def test_restore_requalifies_history_and_retains_cycle_timing(self):
         self.start_solar()
-        saved = policy.serialize(self.observed, self.state)
+        saved = storage.serialize(self.observed, self.state)
         self.assertNotIn("window", saved)
-        observed, new = policy.restore(saved, 100)
+        observed, new = storage.restore(saved, 100)
         self.assertTrue(observed.running)
         self.assertEqual(observed.last_start, 60)
         self.assertFalse(new.window.samples)
 
     def test_invalid_future_timestamps_not_restored(self):
-        self.observed, self.state = policy.restore({"running": True, "last_start": 500}, 100)
+        self.observed, self.state = storage.restore({"running": True, "last_start": 500}, 100)
         self.assertFalse(self.observed.running)
 
     def test_retired_discharge_block_is_ignored_after_upgrade(self):
-        self.observed, self.state = policy.restore(
+        self.observed, self.state = storage.restore(
             {"discharge_blocked": True, "adverse_since": 0}, 2000
         )
         bad = replace(self.snapshot, grid=True, soc=98, battery=500)

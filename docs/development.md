@@ -53,7 +53,7 @@ docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace,readonl
 
 `docs/ci/tests.yml.disabled` — неактивний шаблон. GitHub не запускає його; тести наразі виконуються лише локально. Шаблон містить такі перевірки:
 
-- Ruff і строгий mypy для domain/strategy/window на Python 3.14.2.
+- Ruff і строгий mypy для domain/strategy/window/presentation/storage на Python 3.14.2.
 - Unit-тести й перевірка компіляції на Python 3.11 та 3.14.2.
 - HA-тести на Ubuntu 24.04 / Python 3.14.2; перевірка залежностей і JUnit-звіт як artifact, зокрема при падінні тестів.
 
@@ -89,3 +89,10 @@ docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace,readonl
 
 
 2026-10-15: за рішенням користувача автоматичні перевірки GitHub вимкнено. Шаблон винесено за межі `.github/workflows/` і перейменовано на `tests.yml.disabled`. Для майбутнього ввімкнення його потрібно явно повернути як `.github/workflows/tests.yml`; зараз цього робити не потрібно.
+
+
+## Перевірений результат третього етапу
+
+2026-10-15: 159 unit-тестів пройшли на Windows / Python 3.11 і Linux / Python 3.14.2; 18 HA-тестів — на Linux / HA 2026.10.1. Новий набір `tests/unit/test_adapters.py` перевіряє capture/нормалізацію, метадані актуальності, Store v1 і приватність експорту. Команда `python -m mypy` тепер охоплює сім файлів; відсутні пакети HA допускаються лише для імпортів `homeassistant.*` у легкому локальному середовищі.
+
+Публічний стан і persistence додатково порівняно з координатором до етапу 3 на 2 000 оцінюваннях — без розбіжностей. Локальний звіт HA: `test-results/ha-stage3.xml`. GitHub-тести залишаються вимкненими.

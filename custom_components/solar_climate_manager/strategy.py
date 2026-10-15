@@ -1,9 +1,7 @@
 """Deterministic energy and comfort policy; device I/O belongs to the coordinator."""
 
 from copy import deepcopy
-from dataclasses import asdict
 from math import isfinite
-from typing import Any
 
 from .domain.types import (
     Action,
@@ -40,17 +38,6 @@ REASONS = [
     "grid_power_unavailable",
     "running",
 ]
-
-
-def valid_timestamp(value: object, now: float) -> float | None:
-    return (
-        value
-        if isinstance(value, (float, int))
-        and not isinstance(value, bool)
-        and isfinite(value)
-        and 0 <= value <= now
-        else None
-    )
 
 
 def remaining(now: float, since: float | None, duration: float) -> float:
@@ -291,27 +278,3 @@ def decide(
         )
     desired_running = True
     return result("start", "grid_ready" if snapshot.grid else "solar_ready", True)
-
-
-def serialize(observed: ObservedDeviceState, policy: PolicyState) -> dict[str, Any]:
-    """Keep the existing flat Store v1 shape while runtime states are separate."""
-    return {
-        **asdict(observed),
-        "surplus_since": policy.surplus_since,
-        "deficit_since": policy.deficit_since,
-        "grid_absent_since": policy.grid_absent_since,
-        "soc_blocked": policy.soc_blocked,
-    }
-
-
-def restore(data: Any, now: float) -> tuple[ObservedDeviceState, PolicyState]:
-    """Retain physical cycle deadlines; requalify continuity after downtime."""
-    if not isinstance(data, dict):
-        return ObservedDeviceState(), PolicyState()
-    last_start = valid_timestamp(data.get("last_start"), now)
-    observed = ObservedDeviceState(
-        running=data.get("running") is True and last_start is not None,
-        last_start=last_start,
-        last_stop=valid_timestamp(data.get("last_stop"), now),
-    )
-    return observed, PolicyState(soc_blocked=data.get("soc_blocked") is True)
