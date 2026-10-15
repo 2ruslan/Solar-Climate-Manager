@@ -26,6 +26,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass, entry):
         super().__init__(hass, LOGGER, name=DOMAIN, config_entry=entry, always_update=False)
+        self.group_observer = None
         self.entry = entry
         self.device_id = entry.data.get("device_id", entry.entry_id)
         self.settings = configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS)
@@ -56,6 +57,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
 
     async def async_shutdown(self):
         """Complete persistence before a replacement coordinator loads the store."""
+        if self.group_observer is not None:
+            self.group_observer.unregister(self)
         await self.commands.shutdown()
         await self.store.async_save(self._stored_state())
 
@@ -121,6 +124,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 LOGGER.debug("Entry %s: %s", self.entry.entry_id, decision.reason)
             self.async_set_updated_data(data)
         self.commands.schedule()
+        if self.group_observer is not None:
+            self.group_observer.evaluate()
 
     @callback
     def _set_operation_mode(self, mode):

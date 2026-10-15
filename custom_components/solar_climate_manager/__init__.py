@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 from .adapters.migrations import CONFIG_VERSION, migrate_device_data
 from .const import PLATFORMS
 from .coordinator import SolarClimateCoordinator
+from .runtime.group_observation import get_group_observer
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -13,6 +14,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = coordinator
     await coordinator.async_initialize()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await get_group_observer(hass).async_register(coordinator)
     return True
 
 

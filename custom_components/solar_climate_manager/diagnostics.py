@@ -5,9 +5,14 @@ from .presentation import build_export
 
 async def async_get_config_entry_diagnostics(hass, entry):
     coordinator = entry.runtime_data
-    return build_export(
+    data = build_export(
         coordinator.settings,
         coordinator.data,
         coordinator.runtime.manual_date,
         coordinator.runtime.previous_mode,
     )
+    if coordinator.group_observer is not None:
+        observation = coordinator.group_observer.diagnostics(coordinator.device_id)
+        if observation is not None:
+            data["group_observation"] = observation
+    return data

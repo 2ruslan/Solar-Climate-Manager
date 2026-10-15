@@ -457,3 +457,134 @@ async def test_future_config_version_is_not_migrated(hass):
     assert not await async_migrate_entry(hass, entry)
     assert entry.version == 3
     assert "device_id" not in entry.data
+
+
+async def setup_shadow_group(hass):
+    from custom_components.solar_climate_manager.adapters.groups import get_group_repository
+    from custom_components.solar_climate_manager.domain.groups import GroupPolicy, GroupSources
+
+    first = await setup(hass)
+    hass.states.async_set("climate.second", "off", {
+        "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21})
+    second = MockConfigEntry(domain=DOMAIN, data={**inputs(), "climate_entity": "climate.second"},
+                            unique_id="climate.second", version=1)
+    second.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    await hass.async_block_till_done()
+    for entity, value, unit in (("sensor.pv", "1600", "W"), ("sensor.load", "600", "W"),
+                                ("sensor.soc", "95", "%"), ("sensor.battery", "0", "W")):
+        hass.states.async_set(entity, value, {"unit_of_measurement": unit})
+    hass.states.async_set("binary_sensor.grid", "off")
+    repository = get_group_repository(hass)
+    registry = await repository.async_update(lambda state: state.create(
+        "House", GroupSources(pv_power_entity="sensor.pv", load_power_entity="sensor.load",
+                              soc_entity="sensor.soc", battery_power_entity="sensor.battery",
+                              grid_available_entity="binary_sensor.grid"),
+        GroupPolicy(start_delay=0))[0])
+    group_id = registry.groups[0].group_id
+    await repository.async_update(lambda state: state.join(first.runtime_data.device_id, group_id)
+                                  .join(second.runtime_data.device_id, group_id))
+    first.runtime_data._evaluate()
+    await hass.async_block_till_done()
+    return first, second, repository, group_id
+
+
+async def test_group_shadow_allocation_has_no_service_calls_or_real_reservations(hass):
+    from custom_components.solar_climate_manager.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    with patch.object(type(hass.services), "async_call") as calls:
+        first, second, repository, group_id = await setup_shadow_group(hass)
+        observer = first.runtime_data.group_observer
+        result = observer.results[group_id]
+        assert result["shadow"] is True
+        assert result["shadow_reserved_watts"] == 900
+        assert result["unresolved_reserved_watts"] == 0
+        assert result["available_watts"] == 100
+        assert sum(d["action"] == "start" for d in result["decisions"]) == 1
+        assert repository.registry.unresolved == ()
+        assert observer.states[group_id].reservations == ()
+        for _ in range(3):
+            second.runtime_data._evaluate()
+            assert observer.results[group_id] == result
+        exported = await async_get_config_entry_diagnostics(hass, first)
+        assert exported["group_observation"] == result
+        assert "sensor.pv" not in str(exported)
+        calls.assert_not_called()
+        assert hass.states.get("climate.test").state == "off"
+        assert hass.states.get("climate.second").state == "off"
+
+
+async def test_group_shadow_unload_blocks_new_previews_and_reload_restores_them(hass):
+    first, second, repository, group_id = await setup_shadow_group(hass)
+    observer = first.runtime_data.group_observer
+    device_id = first.runtime_data.device_id
+    assert await hass.config_entries.async_unload(first.entry_id)
+    assert device_id not in observer.devices
+    assert observer.results[group_id]["reason"] == "members_unavailable"
+    assert observer.results[group_id]["decisions"] == []
+    assert len(repository.registry.memberships) == 2
+    assert await hass.config_entries.async_setup(first.entry_id)
+    await hass.async_block_till_done()
+    second.runtime_data._evaluate()
+    assert observer.results[group_id]["shadow_reserved_watts"] == 900
+
+
+async def test_two_shadow_groups_keep_separate_budgets(hass):
+    from custom_components.solar_climate_manager.domain.groups import GroupPolicy
+
+    first, second, repository, first_group = await setup_shadow_group(hass)
+    first_config = repository.registry.group(first_group)
+    registry = await repository.async_update(lambda state: state.create(
+        "Workshop", first_config.sources, GroupPolicy(start_delay=0))[0])
+    second_group = registry.groups[1].group_id
+    second_id = second.runtime_data.device_id
+    await repository.async_update(lambda state: state.leave(second_id).join(second_id, second_group))
+    first.runtime_data._evaluate()
+    observer = first.runtime_data.group_observer
+    assert observer.results[first_group]["shadow_reserved_watts"] == 900
+    assert observer.results[second_group]["shadow_reserved_watts"] == 900
+    assert len(observer.results[first_group]["decisions"]) == 1
+    assert len(observer.results[second_group]["decisions"]) == 1
+
+
+async def test_group_shadow_cannot_consume_or_release_durable_uncertainty(hass):
+    from dataclasses import replace
+
+    from custom_components.solar_climate_manager.domain.groups import UnresolvedReservation
+
+    first, second, repository, group_id = await setup_shadow_group(hass)
+    await repository.async_update(lambda state: replace(state, unresolved=(
+        UnresolvedReservation(first.runtime_data.device_id, group_id, 900),)))
+    before = repository.registry
+    second.runtime_data._evaluate()
+    result = first.runtime_data.group_observer.results[group_id]
+    assert result["unresolved_reserved_watts"] == 900
+    assert result["shadow_reserved_watts"] == 0
+    assert not any(d["action"] == "start" for d in result["decisions"])
+    assert repository.registry is before
+
+
+async def test_group_capture_reads_each_shared_entity_once(hass):
+    from collections import Counter
+
+    first, _, _, _ = await setup_shadow_group(hass)
+    original = hass.states.get
+    with patch.object(type(hass.states), "get", autospec=True,
+                      side_effect=lambda _, entity_id: original(entity_id)) as reads:
+        first.runtime_data.group_observer.evaluate()
+    counts = Counter(call.args[1] for call in reads.call_args_list)
+    assert counts["sensor.pv"] == 1
+    assert counts["sensor.load"] == 1
+    assert counts["sensor.room"] == 1
+    assert all(count == 1 for count in counts.values())
+
+
+async def test_broken_group_store_does_not_break_independent_setup(hass):
+    with patch("custom_components.solar_climate_manager.adapters.groups.GroupRepository.async_load",
+               side_effect=ValueError("unsupported_group_schema")):
+        entry = await setup(hass)
+    coordinator = entry.runtime_data
+    assert coordinator.data["automation_mode"] == "observation"
+    assert coordinator.group_observer.diagnostics(coordinator.device_id)["reason"] == "group_store_unavailable"
