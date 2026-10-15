@@ -14,7 +14,7 @@ addopts = "--strict-markers --strict-config --timeout=60"
 # Incremental boundary: domain, policy, presentation, storage and pure device runtime.
 [tool.mypy]
 python_version = "3.11"
-files = ["custom_components/solar_climate_manager/domain", "custom_components/solar_climate_manager/strategy.py", "custom_components/solar_climate_manager/window.py", "custom_components/solar_climate_manager/presentation.py", "custom_components/solar_climate_manager/adapters/storage.py", "custom_components/solar_climate_manager/runtime/device.py"]
+files = ["custom_components/solar_climate_manager/domain", "custom_components/solar_climate_manager/strategy.py", "custom_components/solar_climate_manager/window.py", "custom_components/solar_climate_manager/presentation.py", "custom_components/solar_climate_manager/adapters/storage.py", "custom_components/solar_climate_manager/runtime/device.py", "custom_components/solar_climate_manager/adapters/groups.py", "custom_components/solar_climate_manager/adapters/migrations.py"]
 strict = true
 follow_imports = "silent"
 explicit_package_bases = true

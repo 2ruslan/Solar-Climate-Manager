@@ -32,6 +32,8 @@ FIXED_POLICY_KEYS = {
 
 def configuration_values(data, options, defaults, removed):
     saved = {**data, **options}
+    # Identity is metadata, not policy: retain existing Store signatures on migration.
+    saved.pop("device_id", None)
     values = {key: value for key, value in {**defaults, **saved}.items() if key not in removed}
     for key in FIXED_POLICY_KEYS:
         values[key] = defaults[key]

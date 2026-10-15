@@ -1,9 +1,12 @@
 """Short section-based configuration; hidden settings survive section edits."""
 
+from uuid import uuid4
+
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
+from .adapters.migrations import CONFIG_VERSION
 from .climate_control import normalized_target
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .settings import (
@@ -130,7 +133,7 @@ def validate(hass, data):
 
 
 class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 1
+    VERSION = CONFIG_VERSION
 
     async def async_step_user(self, user_input=None):
         errors = {}
@@ -140,7 +143,7 @@ class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if error is None:
                 await self.async_set_unique_id(values["climate_entity"])
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=values["climate_entity"], data=values)
+                return self.async_create_entry(title=values["climate_entity"], data={**values, "device_id": uuid4().hex})
             errors["base"] = error
         keys = (COMFORT_KEYS - {"schedule_entity"}) | {"climate_entity"}
         schema = settings_schema(DEFAULTS, keys)

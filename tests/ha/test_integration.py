@@ -369,3 +369,91 @@ async def test_unload_cancels_inflight_climate_command(hass):
         assert task.done()
         assert coordinator.commands.task is None
         assert coordinator.commands.closed
+
+
+@pytest.mark.parametrize("mode", ["disabled", "observation", "control", "temporary_block"])
+async def test_v1_migration_preserves_identity_mode_options_and_signatures(hass, mode):
+    from custom_components.solar_climate_manager import async_migrate_entry
+    from custom_components.solar_climate_manager.const import REMOVED_SETTINGS
+    from custom_components.solar_climate_manager.settings import configuration_values
+
+    original = {**inputs(), "operation_mode": mode}
+    options = {"temporary_block_date": "2026-10-15", "temporary_previous_mode": "control"}
+    entry = MockConfigEntry(domain=DOMAIN, data=original, options=options,
+                            unique_id="climate.test", version=1)
+    entry.add_to_hass(hass)
+    identity = entry.entry_id
+    assert await async_migrate_entry(hass, entry)
+    assert entry.version == 2
+    assert entry.entry_id == identity
+    assert entry.unique_id == "climate.test"
+    assert entry.data["device_id"] == identity
+    assert entry.data["operation_mode"] == mode
+    assert dict(entry.options) == options
+    assert configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS) == configuration_values(
+        original, options, DEFAULTS, REMOVED_SETTINGS)
+    assert await async_migrate_entry(hass, entry)
+    assert entry.data["device_id"] == identity
+
+
+async def test_group_repository_real_store_preserves_members_and_reservations(hass):
+    from dataclasses import replace
+
+    from custom_components.solar_climate_manager.adapters.groups import (
+        GroupRepository,
+        get_group_repository,
+    )
+    from custom_components.solar_climate_manager.domain.groups import (
+        GroupPolicy,
+        GroupSources,
+        UnresolvedReservation,
+    )
+
+    repository = get_group_repository(hass)
+    assert get_group_repository(hass) is repository
+    await repository.async_load()
+    registry = await repository.async_update(lambda state: state.create(
+        "House", GroupSources(), GroupPolicy())[0])
+    group_id = registry.groups[0].group_id
+    await repository.async_update(lambda state: state.join("one", group_id).join("two", group_id))
+    await repository.async_update(lambda state: replace(state, unresolved=(
+        UnresolvedReservation("one", group_id, 900),)))
+    reloaded = await GroupRepository(repository.store).async_load()
+    assert reloaded == repository.registry
+    assert len(reloaded.memberships) == 2
+    assert reloaded.unresolved[0].watts == 900
+
+
+async def test_two_legacy_entries_remain_independent_after_setup_and_reload(hass):
+    from custom_components.solar_climate_manager.adapters.groups import get_group_repository
+
+    first = await setup(hass)
+    hass.states.async_set("climate.second", "off", {
+        "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21})
+    second = MockConfigEntry(domain=DOMAIN, data={**inputs(), "climate_entity": "climate.second"},
+                            unique_id="climate.second", version=1)
+    second.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    await hass.async_block_till_done()
+    assert first.version == second.version == 2
+    assert first.runtime_data.device_id != second.runtime_data.device_id
+    assert first.runtime_data.runtime is not second.runtime_data.runtime
+    assert first.runtime_data.commands is not second.runtime_data.commands
+    registry = await get_group_repository(hass).async_load()
+    assert registry.memberships == ()
+    identity = first.runtime_data.device_id
+    assert await hass.config_entries.async_reload(first.entry_id)
+    await hass.async_block_till_done()
+    assert first.runtime_data.device_id == identity
+    assert first.runtime_data.settings["operation_mode"] == "observation"
+    assert second.runtime_data.settings["operation_mode"] == "observation"
+
+
+async def test_future_config_version_is_not_migrated(hass):
+    from custom_components.solar_climate_manager import async_migrate_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data=inputs(), version=3)
+    entry.add_to_hass(hass)
+    assert not await async_migrate_entry(hass, entry)
+    assert entry.version == 3
+    assert "device_id" not in entry.data

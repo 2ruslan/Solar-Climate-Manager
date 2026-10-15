@@ -27,6 +27,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, entry):
         super().__init__(hass, LOGGER, name=DOMAIN, config_entry=entry, always_update=False)
         self.entry = entry
+        self.device_id = entry.data.get("device_id", entry.entry_id)
         self.settings = configuration_values(entry.data, entry.options, DEFAULTS, REMOVED_SETTINGS)
         self.settings.pop("temporary_previous_mode", None)
         self.settings.pop("temporary_block_date", None)
