@@ -125,6 +125,9 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
         return self.async_show_menu(step_id="init", menu_options=[*choices, "group"])
 
     def form(self, step, keys, values, errors=None):
+        self._section_original = (
+            dict(self.config_entry.data), dict(self.config_entry.options), self.cached_membership()
+        )
         schema = settings_schema(values, keys)
         suggested = {
             key: value for key, value in values.items() if key in keys and value is not None
@@ -144,6 +147,9 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
             elif step == "energy":
                 keys = ACCOUNTING_KEYS
         if user_input is not None:
+            current = (dict(self.config_entry.data), dict(self.config_entry.options), member)
+            if getattr(self, "_section_original", current) != current:
+                return self.async_abort(reason="configuration_changed")
             merged = merge_section(
                 values,
                 user_input,

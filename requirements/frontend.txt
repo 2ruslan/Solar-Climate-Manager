@@ -1,0 +1,2 @@
+# Optional local browser checks, separate from HA runtime dependencies.
+playwright==1.64.0

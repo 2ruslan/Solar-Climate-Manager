@@ -10,7 +10,16 @@ from .runtime.group import get_group_manager
 from .runtime.group_observation import get_group_observer
 
 
+async def async_setup(hass: HomeAssistant, config) -> bool:
+    from .panel import async_setup_panel_api
+
+    await async_setup_panel_api(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    from .panel import async_show_panel
+
     coordinator = SolarClimateCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = get_group_manager(hass)
@@ -19,6 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await get_group_observer(hass).async_register(coordinator)
     manager.register(coordinator)
+    await async_show_panel(hass)
     return True
 
 
@@ -26,6 +36,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         await entry.runtime_data.async_shutdown()
+        from .panel import async_hide_panel
+
+        async_hide_panel(hass)
     return unloaded
 
 

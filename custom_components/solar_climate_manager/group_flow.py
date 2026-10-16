@@ -247,6 +247,9 @@ class GroupOptionsMixin:
         def edit(state):
             if state.group(original.group_id) != original:
                 raise ValueError("configuration_changed")
+            members = tuple(m for m in state.memberships if m.group_id == original.group_id)
+            if getattr(self, "_original_members", members) != members:
+                raise ValueError("configuration_changed")
             member = state.membership(self.device_id)
             if member is None or member.group_id != original.group_id:
                 raise ValueError("configuration_changed")
@@ -259,6 +262,13 @@ class GroupOptionsMixin:
             },
         )
 
+    async def _remember_group(self, group):
+        state = await self._registry()
+        self._original = group
+        self._original_members = tuple(
+            m for m in state.memberships if m.group_id == group.group_id
+        )
+
     async def async_step_group_member(self, user_input=None):
         try:
             state, member, group = await self._selected()
@@ -266,7 +276,7 @@ class GroupOptionsMixin:
             return self.async_abort(reason="configuration_changed")
         errors = {}
         if user_input is None:
-            self._original = group
+            await self._remember_group(group)
         else:
             try:
 
@@ -301,7 +311,7 @@ class GroupOptionsMixin:
                 return self.async_abort(reason="configuration_changed")
             values = {**asdict(group.sources), **asdict(group.policy)}
             if user_input is None:
-                self._original = group
+                await self._remember_group(group)
         errors = {}
         if user_input is not None:
             try:
@@ -342,7 +352,7 @@ class GroupOptionsMixin:
                 return self.async_abort(reason="configuration_changed")
             values = asdict(group.policy)
             if user_input is None:
-                self._original = group
+                await self._remember_group(group)
         errors = {}
         if user_input is not None:
             try:
