@@ -25,6 +25,7 @@ class DeviceRequest:
     last_start: float | None = None
     last_stop: float | None = None
     state_observed_at: float | None = None
+    command_confirmed_at: float | None = None
 
     def __post_init__(self) -> None:
         if not self.device_id or self.operation_mode not in (
@@ -39,6 +40,8 @@ class DeviceRequest:
 
     @property
     def watts(self) -> float | None:
+        if self.policy.power_accounting == "estimated":
+            return self.policy.planned_watts if self.running else (None if self.running is None else 0.0)
         if self.measured_watts is not None:
             return (
                 self.measured_watts
@@ -195,7 +198,10 @@ def _covered(
         or policy.load_scope == "includes_all_members"
         and (
             any(r.watts is None for r in snapshot.requests)
-            or sum(r.watts or 0 for r in snapshot.requests) > load
+            or sum(
+                r.watts or 0 for r in snapshot.requests
+                if r.policy.power_accounting != "estimated"
+            ) > load
         )
     ):
         return False
@@ -208,6 +214,15 @@ def _covered(
         return False
     if not _telemetry_ready(snapshot, policy):
         return False
+    if request.policy.power_accounting == "estimated":
+        # Aggregate reports prove current group load, not individual consumption.
+        # Require reports captured after the complete stabilization interval.
+        return _after(snapshot.load_reported_at, since, snapshot.now) and (
+            not snapshot.energy.grid
+            or not snapshot.energy.grid_limit_configured
+            or snapshot.energy.grid_import_limit == 0
+            or _after(snapshot.grid_reported_at, since, snapshot.now)
+        )
     if not _after(request.power_reported_at, since, snapshot.now):
         return False
     assert request.power_reported_at is not None
@@ -245,9 +260,38 @@ def reconcile(
             updated.append(reserve)
             continue
         remainder = reserve.watts
+        if request and request.available and request.policy.power_accounting == "estimated":
+            observed = request.state_observed_at or request.state_reported_at
+            if (
+                reserve.stop_sent_at is not None
+                and request.running is False
+                and _after(observed, reserve.stop_sent_at, snapshot.now)
+                and _covered(
+                    snapshot, request,
+                    reserve.stop_sent_at + request.policy.power_settle_seconds, policy,
+                )
+                and snapshot.load_reported_at is not None
+                and snapshot.load_reported_at >= (observed or 0)
+            ):
+                continue
+            confirmed = request.command_confirmed_at
+            if (
+                reserve.phase == "command_pending"
+                and reserve.stop_sent_at is None
+                and reserve.sent_at is not None
+                and request.running is True
+                and _after(confirmed, reserve.sent_at, snapshot.now)
+                and _covered(
+                    snapshot, request,
+                    (confirmed or 0) + request.policy.power_settle_seconds, policy,
+                )
+            ):
+                reserve = replace(reserve, phase="accounted")
+                remainder = 0.0
         if (
             request
             and request.available
+            and request.policy.power_accounting != "estimated"
             and request.measured_watts is not None
             and request.watts is not None
         ):
@@ -284,6 +328,17 @@ def reconcile(
     return replace(state, reservations=tuple(updated)), pending, shadow_pending
 
 
+def member_load(snapshot: GroupSnapshot, state: AllocationState) -> float:
+    """Excluded members: a pending estimate is already charged by its reservation."""
+    pending = {r.device_id: r for r in state.reservations if r.phase != "accounted"}
+    return sum(
+        pending[r.device_id].baseline_watts
+        if r.policy.power_accounting == "estimated" and r.device_id in pending
+        else r.watts or 0.0
+        for r in snapshot.requests
+    )
+
+
 def _valid(value: float | None, *, signed: bool = False) -> bool:
     return (
         value is not None
@@ -316,6 +371,11 @@ def _telemetry_ready(snapshot: GroupSnapshot, policy: GroupPolicy) -> bool:
         return False
     for request in snapshot.requests:
         report = request.state_reported_at
+        if request.running and request.policy.power_accounting == "estimated" and (
+            report is None or load_time <= report + request.policy.power_settle_seconds
+            or limited and grid_time is not None and grid_time <= report + request.policy.power_settle_seconds
+        ):
+            return False
         if request.running and (
             report is None
             or not isfinite(report)
@@ -325,7 +385,7 @@ def _telemetry_ready(snapshot: GroupSnapshot, policy: GroupPolicy) -> bool:
             and report > grid_time
         ):
             return False
-        if request.measured_watts is not None:
+        if request.measured_watts is not None and request.policy.power_accounting != "estimated":
             power_time = request.power_reported_at
             if (
                 power_time is None
@@ -402,11 +462,11 @@ def allocate(
         load = energy.load - (
             max(0, -energy.battery) if policy.load_includes_battery_charging else 0
         )
-        measured = sum(r.watts or 0 for r in snapshot.requests)
+        measured = sum(r.watts or 0 for r in snapshot.requests if r.policy.power_accounting != "estimated")
         if load < 0 or policy.load_scope == "includes_all_members" and measured > load:
             reason = "inconsistent_load"
         else:
-            total = load if policy.load_scope == "includes_all_members" else load + measured
+            total = load if policy.load_scope == "includes_all_members" else load + member_load(snapshot, state)
             if energy.grid:
                 if energy.grid_limit_configured and energy.grid_import_limit != 0:
                     if not _valid(energy.grid_import_limit):
@@ -420,7 +480,7 @@ def allocate(
                         budget = energy.grid_import_limit - energy.grid_power - pending
                 else:
                     # Unlimited by policy, not a claim about physical supply capacity.
-                    budget = sum(r.policy.estimated_ac_power for r in snapshot.requests) - pending
+                    budget = sum(r.policy.planned_watts for r in snapshot.requests) - pending
             elif _valid(energy.pv):
                 assert energy.pv is not None
                 budget = energy.pv - total - pending
@@ -524,7 +584,7 @@ def allocate(
         elif hard or available is None:
             pass
         else:
-            incremental = max(0.0, request.policy.estimated_ac_power - (request.watts or 0))
+            incremental = max(0.0, request.policy.planned_watts - (request.watts or 0))
             # Never trust a pre-start aggregate for manually started members either.
             coherent = _telemetry_ready(snapshot, policy)
             if not coherent:

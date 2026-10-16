@@ -163,6 +163,17 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(restored.observed.last_stop, 200)
         self.assertEqual(self.saved["policy_signature"]["target_temperature"], 23)
 
+    def test_legacy_upgrade_preserves_observed_cycle_without_enabling_estimation(self):
+        for key in ("power_accounting", "power_margin_percent", "power_settle_seconds"):
+            self.saved["policy_signature"].pop(key)
+        restored = storage.restore_runtime(self.saved, settings=self.settings, options={}, now=200)
+        self.assertEqual(restored.observed, models.ObservedDeviceState(True, 100, 50))
+        self.assertEqual(self.settings["power_accounting"], "legacy")
+        self.assertNotIn("power_accounting", self.saved["policy_signature"])
+        changed = storage.restore_runtime(self.saved,
+            settings={**self.settings, "power_accounting": "estimated"}, options={}, now=200)
+        self.assertEqual(changed.observed.last_stop, 200)
+
     def test_temporary_block_options_take_precedence_and_missing_mode_is_conservative(self):
         blocked = {**self.settings, "operation_mode": "temporary_block"}
         for mode, expected in (("control", "control"), ("invalid", "observation")):

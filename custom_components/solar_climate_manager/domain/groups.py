@@ -129,9 +129,13 @@ class MemberPolicy:
     minimum_run_time: float = 600
     minimum_off_time: float = 600
     ac_power_entity: str | None = None
+    power_accounting: Literal["legacy", "meter", "estimated"] = "legacy"
+    power_margin_percent: float = 20
+    power_settle_seconds: float = 120
 
     def __post_init__(self) -> None:
-        for value in (self.estimated_ac_power, self.minimum_run_time, self.minimum_off_time):
+        for value in (self.estimated_ac_power, self.minimum_run_time, self.minimum_off_time,
+                      self.power_margin_percent, self.power_settle_seconds):
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
@@ -141,12 +145,24 @@ class MemberPolicy:
                 raise ValueError("invalid_member_policy")
         if self.estimated_ac_power == 0:
             raise ValueError("invalid_member_policy")
+        if self.power_accounting not in ("legacy", "meter", "estimated"):
+            raise ValueError("invalid_member_policy")
+        if not 0 <= self.power_margin_percent <= 100 or not 30 <= self.power_settle_seconds <= 1800:
+            raise ValueError("invalid_member_policy")
+        if self.power_accounting == "meter" and not self.ac_power_entity:
+            raise ValueError("missing_power_meter")
         if self.ac_power_entity is not None and (
             not isinstance(self.ac_power_entity, str)
             or not self.ac_power_entity.startswith("sensor.")
             or self.ac_power_entity == "sensor."
         ):
             raise ValueError("invalid_member_source")
+
+    @property
+    def planned_watts(self) -> float:
+        return self.estimated_ac_power * (
+            1 + self.power_margin_percent / 100 if self.power_accounting == "estimated" else 1
+        )
 
     @classmethod
     def from_settings(cls, settings: dict[str, Any]) -> "MemberPolicy":
@@ -158,6 +174,9 @@ class MemberPolicy:
                     "minimum_run_time",
                     "minimum_off_time",
                     "ac_power_entity",
+                    "power_accounting",
+                    "power_margin_percent",
+                    "power_settle_seconds",
                 )
                 if key in settings
             }

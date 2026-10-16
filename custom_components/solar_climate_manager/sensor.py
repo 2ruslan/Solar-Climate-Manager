@@ -4,6 +4,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTemperature, UnitOfTime
 
 from .const import POWER_SOURCES
+from .domain.groups import MemberPolicy
 from .entity import SolarClimateEntity
 from .group_presentation import COMMAND_PHASES, GROUP_ACTIONS, GROUP_REASONS
 from .settings import OPERATION_MODES
@@ -93,10 +94,15 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         if self.key == "group_action":
+            policy = MemberPolicy.from_settings(self.coordinator.settings)
             manager = self.coordinator.group_manager
             registry = manager.repository.registry if manager else None
             member = registry.membership(self.coordinator.device_id) if registry else None
             return {"group_id": member.group_id if member else None, "priority": member.priority if member else None,
+                    "power_accounting": policy.power_accounting,
+                    "planned_start_power_w": policy.planned_watts,
+                    "power_margin_percent": policy.power_margin_percent if policy.power_accounting == "estimated" else 0,
+                    "power_settle_seconds": policy.power_settle_seconds if policy.power_accounting == "estimated" else None,
                     "preview": str(self.native_value).startswith("preview_"),
                     "budget_kind": "grid" if manager and member and manager.snapshots.get(member.group_id) and manager.snapshots[member.group_id].energy.grid else "solar"}
         if self.key == "strategy_action":

@@ -13,6 +13,7 @@ from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .flow_helpers import SOURCE_KEYS, settings_schema, validate
 from .group_flow import GroupOptionsMixin, ensure_editable, flow_error
 from .settings import (
+    ACCOUNTING_KEYS,
     ADVANCED_KEYS,
     COMFORT_KEYS,
     ENERGY_KEYS,
@@ -141,7 +142,7 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
             if step == "sources":
                 keys = {"ac_power_entity"}
             elif step == "energy":
-                keys = {"estimated_ac_power"}
+                keys = ACCOUNTING_KEYS
         if user_input is not None:
             merged = merge_section(
                 values,
@@ -158,13 +159,14 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
                     validation_values = {**merged, **asdict(group.sources), **asdict(group.policy)}
                 if any(
                     merged.get(key) != values.get(key)
-                    for key in ("ac_power_entity", "temperature_entity")
+                    for key in (*ACCOUNTING_KEYS, "temperature_entity")
                 ):
                     try:
                         recovery = (
                             values.get("ac_power_entity") is None
                             and merged.get("ac_power_entity") is not None
                             and merged.get("temperature_entity") == values.get("temperature_entity")
+                            and all(merged.get(key) == values.get(key) for key in ACCOUNTING_KEYS - {"ac_power_entity"})
                         )
                         ensure_editable(
                             self.hass, registry, {self.device_id}, allow_meter_recovery=recovery

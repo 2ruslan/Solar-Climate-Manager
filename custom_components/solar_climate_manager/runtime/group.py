@@ -51,6 +51,7 @@ class GroupManager:
         self.mutating_devices: set[str] = set()
         self.issued: set[str] = set()
         self.stop_times: dict[str, float] = {}
+        self.start_times: dict[str, float] = {}
         self.task: asyncio.Task[None] | None = None
         self.dirty = False
         self.error: str | None = None
@@ -94,6 +95,7 @@ class GroupManager:
                 if reserve.device_id == device_id and reserve.command_id:
                     self.issued.discard(reserve.command_id)
         self.stop_times.pop(device_id, None)
+        self.start_times.pop(device_id, None)
         coordinator.group_manager = None
         if not self.devices:
             for unsubscribe in (self._source_unsub, self._timer_unsub, self._repository_unsub):
@@ -190,7 +192,7 @@ class GroupManager:
                     r.created_at,
                     r.baseline_watts,
                     phase=r.phase if r.command_id in self.issued else "uncertain",
-                    sent_at=r.sent_at,
+                    sent_at=self.start_times.get(r.device_id, r.sent_at),
                     stop_sent_at=self.stop_times.get(r.device_id),
                 )
                 for r in registry.unresolved
@@ -231,6 +233,30 @@ class GroupManager:
             and not (ignore is not None and r.command_id == ignore)
         ]
         own = next((r for r in pending if r.device_id == device_id), None)
+        stop_sent = self.stop_times.get(device_id)
+        if (
+            own is not None
+            and request.policy.power_accounting == "estimated"
+            and request.running is False
+            and stop_sent is not None
+            and request.state_observed_at is not None
+            and stop_sent < request.state_observed_at <= snapshot.now
+        ):
+            # Repeated off commands would restart a long stabilization interval
+            # forever. A fresh off waits for aggregate reconciliation instead.
+            return None
+        if (
+            own is not None
+            and request.policy.power_accounting == "estimated"
+            and (
+                own.phase == "uncertain"
+                or own.command_id not in self.issued
+                or stop_sent is not None
+            )
+        ):
+            # An estimate cannot prove a failed or restored start. Recover through
+            # an explicit off command, then fresh aggregate reports after settling.
+            return False
         if (
             own is not None
             and request.running is False
@@ -298,6 +324,7 @@ class GroupManager:
             )
             for reserve in resolved:
                 self.stop_times.pop(reserve.device_id, None)
+                self.start_times.pop(reserve.device_id, None)
                 if reserve.command_id:
                     self.issued.discard(reserve.command_id)
 
@@ -485,6 +512,8 @@ class GroupManager:
                 self.stop_times[device_id] = dt_util.utcnow().timestamp()
             if own and own.command_id:
                 self.issued.add(own.command_id)
+            if inserted is not None:
+                self.start_times[device_id] = dt_util.utcnow().timestamp()
             return DispatchTicket(group_id, device_id, own.command_id if own else None, service)
 
     async def async_finished(self, ticket: DispatchTicket, *, failed: bool) -> None:
@@ -578,7 +607,7 @@ class GroupManager:
                 if reserve.phase == "uncertain" or reserve.command_id not in self.issued
                 else "service_pending"
                 if attempt and attempt.service_status == "pending"
-                else "awaiting_meter"
+                else ("awaiting_stabilization" if coordinator.settings.get("power_accounting") == "estimated" else "awaiting_meter")
                 if attempt and attempt.confirmed_at is not None
                 else "awaiting_confirmation"
             )

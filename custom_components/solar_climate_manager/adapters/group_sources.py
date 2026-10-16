@@ -39,6 +39,9 @@ def capture_group(
             continue
         settings = {**coordinator.settings, **asdict(group.policy), **asdict(group.sources)}
         settings["load_includes_ac"] = group.policy.load_scope == "includes_all_members"
+        member_policy = MemberPolicy.from_settings(settings)
+        if member_policy.power_accounting == "estimated":
+            settings["ac_power_entity"] = None
         source = read_sources(
             get_state,
             settings,
@@ -59,10 +62,11 @@ def capture_group(
         climate = get_state(settings["climate_entity"])
         changed = getattr(climate, "last_changed", source.readings["climate_entity"].reported_at)
         observed = coordinator.runtime.observed
+        attempt = coordinator.commands.state.attempt
         requests.append(
             DeviceRequest(
                 member.device_id,
-                MemberPolicy.from_settings(settings),
+                member_policy,
                 member.priority,
                 (
                     "temporary_block"
@@ -79,6 +83,9 @@ def capture_group(
                 state_reported_at=changed.timestamp() if changed else None,
                 state_observed_at=climate.last_reported.timestamp()
                 if climate is not None
+                else None,
+                command_confirmed_at=attempt.confirmed_at
+                if attempt and attempt.service == "set_temperature" and attempt.service_status == "completed"
                 else None,
                 last_start=observed.last_start
                 if observed.running == source.running

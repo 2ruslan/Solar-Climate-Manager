@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from .domain.allocator import GroupAllocation, GroupSnapshot
+from .domain.allocator import GroupAllocation, GroupSnapshot, member_load
 from .domain.groups import GroupPolicy
 
 GROUP_REASONS = [
@@ -60,6 +60,7 @@ COMMAND_PHASES = [
     "service_pending",
     "awaiting_confirmation",
     "awaiting_meter",
+    "awaiting_stabilization",
     "awaiting_stop",
     "uncertain",
     "confirmed",
@@ -86,7 +87,7 @@ def group_metrics(
         load -= max(0, -battery) if policy.load_includes_battery_charging else 0
         if policy.load_scope == "excludes_all_members":
             load = (
-                load + sum(r.watts or 0 for r in snapshot.requests)
+                load + member_load(snapshot, result.state)
                 if all(r.watts is not None for r in snapshot.requests)
                 else None
             )

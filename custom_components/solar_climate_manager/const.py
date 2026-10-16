@@ -66,4 +66,7 @@ DEFAULTS = {
     "operation_mode": "observation",
     "power_max_data_age": 900,
     "grid_absence_minutes": 10,
+    "power_accounting": "legacy",
+    "power_margin_percent": 20,
+    "power_settle_seconds": 120,
 }

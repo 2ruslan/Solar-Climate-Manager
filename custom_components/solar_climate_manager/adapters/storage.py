@@ -104,7 +104,15 @@ def restore_runtime(
         previous = options.get("temporary_previous_mode")
         previous_mode = previous if previous in BASE_MODES else "observation"
     observed, policy = ObservedDeviceState(), PolicyState()
-    if saved.get("policy_signature") == settings:
+    signature = saved.get("policy_signature")
+    if isinstance(signature, dict):
+        signature = dict(signature)
+        # Missing new parameters mean the unchanged pre-estimation behavior.
+        for key, default in (("power_accounting", "legacy"), ("power_margin_percent", 20),
+                             ("power_settle_seconds", 120)):
+            if key in settings:
+                signature.setdefault(key, default)
+    if signature == settings:
         observed, policy = restore(saved.get("control"), now)
     elif isinstance(previous_control := saved.get("control"), dict):
         policy.soc_blocked = previous_control.get("soc_blocked") is True

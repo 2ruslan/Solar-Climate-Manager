@@ -8,6 +8,8 @@ NUMERIC_SETTINGS = {
     "ac_min_temperature": (5, 35, 0.5, "°C"),
     "ac_max_temperature": (5, 35, 0.5, "°C"),
     "estimated_ac_power": (100, 10000, 50, "W"),
+    "power_margin_percent": (0, 100, 1, "%"),
+    "power_settle_seconds": (30, 1800, 10, "s"),
     "minimum_soc": (0, 99, 1, "%"),
     "restart_soc": (1, 100, 1, "%"),
     "grid_absence_minutes": (0, 120, 1, "min"),
@@ -67,6 +69,10 @@ ENERGY_KEYS = {
     "estimated_ac_power",
     "minimum_soc",
     "restart_soc",
+}
+ACCOUNTING_KEYS = {
+    "estimated_ac_power", "power_accounting", "power_margin_percent",
+    "power_settle_seconds", "ac_power_entity",
 }
 SOURCE_FLAGS = {
     "load_includes_ac",

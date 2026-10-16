@@ -4,6 +4,7 @@ from homeassistant.helpers import selector
 
 from .climate_control import normalized_target
 from .const import OPTIONAL_SOURCES
+from .domain.groups import MemberPolicy
 from .settings import NUMERIC_SETTINGS, SOURCE_FLAGS, valid_policy
 
 try:
@@ -54,11 +55,12 @@ def settings_schema(values, keys):
                 else vol.Optional(key)
             )
             fields[marker] = selector.EntitySelector(selector.EntitySelectorConfig(**config))
-        elif key in ("hvac_mode", "battery_positive", "grid_positive"):
+        elif key in ("hvac_mode", "battery_positive", "grid_positive", "power_accounting"):
             choices = {
                 "hvac_mode": ["heat", "cool"],
                 "battery_positive": ["charge", "discharge"],
                 "grid_positive": ["import", "export"],
+                "power_accounting": ["legacy", "meter", "estimated"],
             }[key]
             fields[vol.Required(key, default=values[key])] = selector.SelectSelector(
                 selector.SelectSelectorConfig(options=choices, translation_key=key)
@@ -69,6 +71,10 @@ def settings_schema(values, keys):
 
 
 def validate(hass, data):
+    try:
+        MemberPolicy.from_settings(data)
+    except ValueError as error:
+        return "missing_power_meter" if str(error) == "missing_power_meter" else "invalid_member_policy"
     climate = hass.states.get(data["climate_entity"])
     temperature = hass.states.get(data["temperature_entity"])
     if climate is None or not data["climate_entity"].startswith("climate."):
@@ -97,6 +103,8 @@ def validate(hass, data):
     if not valid_policy(data):
         return "invalid_soc_thresholds"
     for key in OPTIONAL_SOURCES:
+        if key == "ac_power_entity" and data.get("power_accounting") == "estimated":
+            continue
         entity_id = data.get(key)
         if not entity_id:
             continue

@@ -35,7 +35,7 @@
       "unsupported_temperature": "This climate entity does not support a single target temperature.",
       "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device.",
       "switch_to_observation": "Switch affected devices from Control to Observation or Disabled before changing their bindings or group configuration.",
-      "unresolved_reservation": "An unresolved power reservation prevents this change. Wait for physical and meter confirmation; do not erase the reservation.",
+      "unresolved_reservation": "An unresolved reservation blocks this change. Wait for confirmation and accounting reconciliation; do not erase the reservation.",
       "command_in_progress": "Wait for the active command and its physical confirmation.",
       "missing_group": "The selected group no longer exists.",
       "device_already_grouped": "This device already belongs to a group. Leave it before joining another.",
@@ -46,7 +46,9 @@
       "incomplete_sources": "Select total load, battery SOC, battery power and grid availability.",
       "invalid_identifier": "Enter a group name between 1 and 255 characters.",
       "group_storage_error": "Could not load or save the group. Existing settings are preserved.",
-      "already_configured": "This air conditioner already has a Solar Climate Manager entry."
+      "already_configured": "This air conditioner already has a Solar Climate Manager entry.",
+      "missing_power_meter": "Select an AC power sensor for metered accounting.",
+      "invalid_member_policy": "Check accounting mode, positive power, margin 0–100% and stabilization 30–1800 seconds."
     },
     "abort": {
       "already_configured": "This climate entity is already configured.",
@@ -105,9 +107,13 @@
         "data": {
           "estimated_ac_power": "Conservative estimated AC power (W)",
           "minimum_soc": "Charge level for stopping (%)",
-          "restart_soc": "Charge level for resuming operation (%)"
+          "restart_soc": "Charge level for resuming operation (%)",
+          "power_accounting": "Group power accounting",
+          "power_margin_percent": "Estimated power margin (%)",
+          "power_settle_seconds": "Stabilization after confirmation (s)",
+          "ac_power_entity": "AC power sensor (for metered accounting)"
         },
-        "description": "With grid available, low SOC allows operation if the import budget is sufficient and the battery is not materially discharging. Off-grid, minimum SOC is a hard limit. Group members see only individual settings here; shared settings are under Energy group."
+        "description": "Group members can use a meter or estimated electrical power. Estimated mode needs no individual sensor; set a margin and stabilization time. Legacy retains the 0.5.0 behavior. Change accounting in Observation with no unresolved reservations. Independent entries retain their local SOC thresholds here."
       },
       "advanced": {
         "title": "Advanced",
@@ -127,7 +133,7 @@
           "group_leave": "Leave group",
           "group_delete": "Delete empty group"
         },
-        "description": "A group allocates one shared energy budget. Device modes are preserved. Individual AC power meters are needed to reconcile starts automatically."
+        "description": "A group shares one energy budget. Select metered or estimated accounting in each member’s Energy settings. Operation modes are preserved."
       },
       "group_create": {
         "title": "Create group",
@@ -211,7 +217,7 @@
       "unsupported_temperature": "This climate entity does not support a single target temperature.",
       "invalid_ac_temperature_limits": "Check AC command limits: minimum must not exceed maximum, and the range must contain a temperature supported by the device.",
       "switch_to_observation": "Switch affected devices from Control to Observation or Disabled before changing their bindings or group configuration.",
-      "unresolved_reservation": "An unresolved power reservation prevents this change. Wait for physical and meter confirmation; do not erase the reservation.",
+      "unresolved_reservation": "An unresolved reservation blocks this change. Wait for confirmation and accounting reconciliation; do not erase the reservation.",
       "command_in_progress": "Wait for the active command and its physical confirmation.",
       "missing_group": "The selected group no longer exists.",
       "device_already_grouped": "This device already belongs to a group. Leave it before joining another.",
@@ -222,7 +228,9 @@
       "incomplete_sources": "Select total load, battery SOC, battery power and grid availability.",
       "invalid_identifier": "Enter a group name between 1 and 255 characters.",
       "group_storage_error": "Could not load or save the group. Existing settings are preserved.",
-      "already_configured": "This air conditioner already has a Solar Climate Manager entry."
+      "already_configured": "This air conditioner already has a Solar Climate Manager entry.",
+      "missing_power_meter": "Select an AC power sensor for metered accounting.",
+      "invalid_member_policy": "Check accounting mode, positive power, margin 0–100% and stabilization 30–1800 seconds."
     },
     "abort": {
       "group_store_unavailable": "Group storage is unavailable. Restore it and reload the integration.",
@@ -254,6 +262,13 @@
       "options": {
         "includes_all_members": "Includes every group AC",
         "excludes_all_members": "Excludes every group AC"
+      }
+    },
+    "power_accounting": {
+      "options": {
+        "legacy": "Legacy behavior (0.5.0)",
+        "meter": "Individual power meter",
+        "estimated": "Estimated electrical power"
       }
     }
   },
@@ -499,7 +514,8 @@
           "awaiting_stop": "Awaiting stop",
           "uncertain": "Uncertain",
           "confirmed": "Confirmed",
-          "failed": "Failed"
+          "failed": "Failed",
+          "awaiting_stabilization": "Awaiting aggregate stabilization"
         }
       }
     },
