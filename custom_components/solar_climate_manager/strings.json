@@ -64,7 +64,8 @@
           "comfort": "Comfort",
           "energy": "Energy",
           "advanced": "Advanced",
-          "group": "Energy group"
+          "group": "Energy group",
+          "learning_reset": "Reset power learning"
         }
       },
       "sources": {
@@ -111,9 +112,10 @@
           "power_accounting": "Group power accounting",
           "power_margin_percent": "Estimated power margin (%)",
           "power_settle_seconds": "Stabilization after confirmation (s)",
-          "ac_power_entity": "AC power sensor (for metered accounting)"
+          "ac_power_entity": "AC power sensor (for metered accounting)",
+          "power_learning_enabled": "Learn from aggregate consumption"
         },
-        "description": "Group members can use a meter or estimated electrical power. Estimated mode needs no individual sensor; set a margin and stabilization time. Legacy retains the 0.5.0 behavior. Change accounting in Observation with no unresolved reservations. Independent entries retain their local SOC thresholds here."
+        "description": "Group members can use a meter or estimated electrical power. Estimated mode needs no individual sensor; set a margin and stabilization time. Legacy retains the 0.5.0 behavior. Change accounting in Observation with no unresolved reservations. Independent entries retain their local SOC thresholds here. Optional learning requires three consistent isolated starts with other members off and a total meter including all members. The configured power remains the lower bound; the margin is applied afterwards."
       },
       "advanced": {
         "title": "Advanced",
@@ -204,6 +206,10 @@
           "grid_max_data_age": "Maximum grid availability report age (s)"
         },
         "description": "Policy is shared by all members. At most one new start awaits confirmation at a time."
+      },
+      "learning_reset": {
+        "title": "Reset power learning",
+        "description": "Clear accepted observations and the learned estimate. Configured power and learning enablement remain unchanged. Switch the device to Observation and resolve pending reservations, then confirm."
       }
     },
     "error": {
@@ -269,6 +275,25 @@
         "legacy": "Legacy behavior (0.5.0)",
         "meter": "Individual power meter",
         "estimated": "Estimated electrical power"
+      }
+    },
+    "learning_status": {
+      "options": {
+        "disabled": "Disabled",
+        "unsupported": "Requires a group, estimated accounting and an inclusive total meter",
+        "waiting_baseline": "Waiting for baseline",
+        "waiting_start": "Waiting for isolated start",
+        "ineligible": "Observation conditions not met",
+        "stale_data": "Insufficient fresh reports",
+        "unstable_load": "Unstable load — cycle rejected",
+        "changed_device": "Mode or target changed — cycle rejected",
+        "unconfirmed_start": "Start not confirmed",
+        "stabilizing": "Stabilizing and collecting reports",
+        "ambiguous_delta": "Ambiguous load change",
+        "lower_sample": "Lower observation does not reduce planned power",
+        "ready": "Estimate ready",
+        "collecting": "Collecting independent cycles",
+        "inconsistent_cycle": "Inconsistent cycle — previous estimate retained"
       }
     }
   },

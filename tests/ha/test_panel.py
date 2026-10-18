@@ -121,6 +121,9 @@ async def test_panel_assets_and_http_group_wizard_share_existing_operations(hass
     flow = await start(client, first, "energy")
     forms["energy"] = flow
     assert (await client.delete(f"{BASE}/{flow['flow_id']}")).status == 200
+    flow = await start(client, first, "learning_reset")
+    forms["learning_reset"] = flow
+    assert (await client.delete(f"{BASE}/{flow['flow_id']}")).status == 200
     # Optional local fixture for browser QA; no production data or credentials.
     payload = {"overview": await async_overview(hass), "forms": forms}
     await hass.async_add_executor_job(Path("/tmp/scm-panel-fixture.json").write_text,

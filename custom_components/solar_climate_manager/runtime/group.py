@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 from ..adapters.group_sources import capture_group
 from ..adapters.groups import get_group_repository
+from ..adapters.learning import bind_learning, learning_view
 from ..adapters.sources import read_sources
 from ..domain.allocator import (
     AllocationState,
@@ -346,6 +347,7 @@ class GroupManager:
                             assert current is not None
                             actual = current.group(group.group_id)
                             if actual is not None:
+                                self._observe_learning(actual, current)
                                 self._compute(actual, current)
                         except (ValueError, OSError, HomeAssistantError):
                             self.error = "group_storage_error"
@@ -363,6 +365,49 @@ class GroupManager:
                         coordinator.commands.schedule()
         finally:
             self.task = None
+
+    def _observe_learning(self, group: GroupConfig, registry: GroupRegistry) -> None:
+        snapshot = self._capture(group, registry)
+        members = tuple(m for m in registry.memberships if m.group_id == group.group_id)
+        load = snapshot.energy.load
+        battery_valid = True
+        if group.policy.load_includes_battery_charging:
+            battery = self.hass.states.get(group.sources.battery_power_entity)
+            stamp = battery.last_reported.timestamp() if battery else None
+            battery_valid = bool(stamp is not None and snapshot.load_reported_at is not None
+                                 and 0 <= snapshot.now - stamp <= 90
+                                 and abs(stamp - snapshot.load_reported_at) <= 30
+                                 and snapshot.energy.battery is not None)
+            if battery_valid and load is not None:
+                load -= max(0, -(snapshot.energy.battery or 0))
+        for request in snapshot.requests:
+            coordinator = self.devices.get(request.device_id)
+            if coordinator is None or not hasattr(coordinator, "power_learning"):
+                continue
+            before = coordinator.power_learning.stored()
+            learning = bind_learning(coordinator, group, members)
+            settings = coordinator.settings
+            eligible = bool(
+                settings.get("power_learning_enabled")
+                and request.policy.power_accounting == "estimated"
+                and group.policy.load_scope == "includes_all_members"
+                and snapshot.complete and battery_valid and request.operation_mode == "control"
+                and all(r.running is False for r in snapshot.requests if r.device_id != request.device_id)
+                and not any(r.group_id == group.group_id and (
+                    r.device_id != request.device_id or r.command_id not in self.issued
+                ) for r in registry.unresolved)
+                and coordinator.commands.state.error == "none"
+            )
+            climate = self.hass.states.get(settings["climate_entity"])
+            cycle_key = repr(control_fingerprint(climate.state, climate.attributes)) if climate else ""
+            learning.observe(
+                now=snapshot.now, reported=snapshot.load_reported_at, watts=load,
+                running=request.running, changed=request.state_reported_at,
+                confirmed=request.command_confirmed_at, eligible=eligible,
+                settle=request.policy.power_settle_seconds, cycle_key=cycle_key,
+            )
+            if before != learning.stored():
+                coordinator.store.async_delay_save(coordinator._stored_state, 1)
 
     def _command_matches(
         self, coordinator: Any, desired: bool | None, service: str, payload: dict[str, Any]
@@ -549,6 +594,8 @@ class GroupManager:
             "group_reason": "independent",
             "group_command_status": "idle",
         }
+        if hasattr(coordinator, "power_learning"):
+            data["power_learning"] = learning_view(coordinator, dt_util.utcnow().timestamp())
         if registry is None:
             data.update(group_action="wait", group_reason="group_store_unavailable")
             return data

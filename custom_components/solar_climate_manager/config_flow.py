@@ -10,7 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from .adapters.groups import get_group_repository
 from .adapters.migrations import CONFIG_VERSION
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
-from .flow_helpers import SOURCE_KEYS, settings_schema, validate
+from .flow_helpers import SOURCE_KEYS, settings_schema, validate, vol
 from .group_flow import GroupOptionsMixin, ensure_editable, flow_error
 from .settings import (
     ACCOUNTING_KEYS,
@@ -122,7 +122,26 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
         choices = ["sources", "comfort", "energy"]
         if self.cached_membership() is None:
             choices.append("advanced")
+        if self.cached_membership() is not None:
+            choices.append("learning_reset")
         return self.async_show_menu(step_id="init", menu_options=[*choices, "group"])
+
+    async def async_step_learning_reset(self, user_input=None):
+        current = (dict(self.config_entry.data), dict(self.config_entry.options), self.cached_membership())
+        if user_input is not None:
+            if getattr(self, "_reset_original", current) != current:
+                return self.async_abort(reason="configuration_changed")
+            try:
+                registry = await self._registry()
+                ensure_editable(self.hass, registry, {self.device_id})
+            except (ValueError, OSError, HomeAssistantError) as error:
+                return self.async_show_form(step_id="learning_reset", data_schema=vol.Schema({}),
+                                            errors={"base": flow_error(error)})
+            return self.async_create_entry(title="", data={
+                **self.values(), "power_learning_generation": uuid4().hex,
+            })
+        self._reset_original = current
+        return self.async_show_form(step_id="learning_reset", data_schema=vol.Schema({}))
 
     def form(self, step, keys, values, errors=None):
         self._section_original = (

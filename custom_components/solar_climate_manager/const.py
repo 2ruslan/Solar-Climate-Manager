@@ -69,4 +69,6 @@ DEFAULTS = {
     "power_accounting": "legacy",
     "power_margin_percent": 20,
     "power_settle_seconds": 120,
+    "power_learning_enabled": False,
+    "power_learning_generation": "",
 }

@@ -73,6 +73,7 @@ ENERGY_KEYS = {
 ACCOUNTING_KEYS = {
     "estimated_ac_power", "power_accounting", "power_margin_percent",
     "power_settle_seconds", "ac_power_entity",
+    "power_learning_enabled",
 }
 SOURCE_FLAGS = {
     "load_includes_ac",

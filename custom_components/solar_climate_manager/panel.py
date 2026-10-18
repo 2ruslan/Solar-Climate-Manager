@@ -10,8 +10,10 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .adapters.groups import get_group_repository
+from .adapters.learning import learning_view
 from .const import DEFAULTS, DOMAIN, REMOVED_SETTINGS
 from .domain.groups import MemberPolicy
 from .flow_helpers import vol
@@ -21,7 +23,7 @@ from .settings import configuration_values
 PANEL_PATH = "solar-climate-manager"
 ASSET_PATH = "/solar_climate_manager_static"
 PANEL_KEY = f"{DOMAIN}.panel"
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 
 async def async_setup_panel_api(hass):
@@ -98,6 +100,7 @@ async def async_overview(hass):
         mode_entity = entities.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_operation_mode")
         # Unique IDs use the entry ID; never guess an entity's user-editable name.
         policy = MemberPolicy.from_settings(settings)
+        learning = learning_view(coordinator, dt_util.utcnow().timestamp()) if loaded else None
         devices.append({
             "device_id": identity, "entry_id": entry.entry_id,
             "name": climate.attributes.get("friendly_name", entry.title) if climate else entry.title,
@@ -107,7 +110,10 @@ async def async_overview(hass):
             "mode": settings["operation_mode"], "mode_entity": mode_entity,
             "temperature": data.get("temperature"), "target": settings["target_temperature"],
             "running": data.get("running") if loaded else None,
-            "power_accounting": policy.power_accounting, "planned_power": policy.planned_watts,
+            "power_accounting": policy.power_accounting,
+            "planned_power": learning["effective_watts"] * (1 + policy.power_margin_percent / 100)
+            if learning and policy.power_accounting == "estimated" else policy.planned_watts,
+            "learning": learning,
             "measured_power": data.get("ac_power") if policy.power_accounting != "estimated" else None,
             "action": data.get("group_action") if member else data.get("strategy_action"),
             "reason": data.get("group_reason") if member else data.get("strategy_reason"),

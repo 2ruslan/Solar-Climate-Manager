@@ -43,9 +43,12 @@ window.hass={language:'uk',user:{is_admin:true},connection:{},states:{
   return structuredClone(fixture.forms[current]);
  }};
 fixture.overview.devices[0].name='Вітальня';
+fixture.overview.devices[0].learning={enabled:true,supported:true,status:'ready',source:'learned',confidence:'consistent',samples:3,learned_watts:1200};
+fixture.overview.devices[0].power_accounting='estimated';fixture.overview.devices[0].planned_power=1440;
 fixture.overview.devices[1].name='Спальня';
 const independent=structuredClone(fixture.overview.devices[0]);
 Object.assign(independent,{device_id:'independent',entry_id:'independent',name:'Кабінет',group_id:null,power_accounting:'estimated',action:'wait'});
+independent.learning={enabled:false};
 fixture.overview.devices.push(independent);
 window.panel=document.createElement('solar-climate-panel');panel.hass=hass;document.body.append(panel);
 </script></html>"""
@@ -87,13 +90,20 @@ def main():
             expect(page.locator('[name="estimated_ac_power"]')).to_have_value("900")
             page.locator('[name="estimated_ac_power"]').fill("1200")
             page.locator('[name="power_accounting"]').select_option("estimated")
+            page.locator('[name="power_learning_enabled"]').check()
             page.screenshot(path="/tmp/scm-panel-form.png")
             page.get_by_role("button", name="Зберегти", exact=True).click()
             expect(page.get_by_role("heading", name="Зміни збережено")).to_be_visible()
             saved = page.evaluate("calls.at(-1)[2]")
             assert saved["estimated_ac_power"] == 1200
             assert saved["power_accounting"] == "estimated"
+            assert saved["power_learning_enabled"] is True
             assert "ac_power_entity" not in saved
+            page.get_by_role("button", name="Готово", exact=True).click()
+            expect(page.get_by_text("Навчена оцінка · Узгоджені спостереження", exact=False)).to_be_visible()
+            page.get_by_role("button", name="Скинути навчання", exact=True).first.click()
+            page.get_by_role("button", name="Підтвердити", exact=True).click()
+            expect(page.get_by_role("heading", name="Зміни збережено")).to_be_visible()
             page.get_by_role("button", name="Готово", exact=True).click()
             page.get_by_role("button", name="Створити групу", exact=True).click()
             page.get_by_role("button", name="Кабінет", exact=True).click()

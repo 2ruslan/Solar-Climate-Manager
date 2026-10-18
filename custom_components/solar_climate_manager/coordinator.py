@@ -11,6 +11,7 @@ from homeassistant.util import dt as dt_util
 from .adapters.sources import read_sources
 from .adapters.storage import create_store
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
+from .domain.learning import PowerLearning
 from .domain.types import DeviceConfig
 from .manual import control_fingerprint
 from .presentation import build_state
@@ -35,14 +36,16 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.settings.pop("temporary_block_date", None)
         self.store = create_store(hass, entry.entry_id)
         self.runtime = DeviceRuntime(self.settings)
+        self.power_learning = PowerLearning()
         self.commands = CommandExecutor(
             hass, entry, self.runtime, lambda: self.data, self._evaluate, self._publish_command_error
         )
 
     async def async_initialize(self):
-        self.runtime.restore(
-            await self.store.async_load(), self.entry.options, dt_util.utcnow().timestamp()
-        )
+        saved = await self.store.async_load()
+        now = dt_util.utcnow().timestamp()
+        self.runtime.restore(saved, self.entry.options, now)
+        self.power_learning.restore(saved.get("power_learning") if isinstance(saved, dict) else None, now)
         self.entry.async_on_unload(
             async_track_state_change_event(
                 self.hass,
@@ -66,7 +69,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         await self.store.async_save(self._stored_state())
 
     def _stored_state(self):
-        return self.runtime.stored_state()
+        return {**self.runtime.stored_state(), "power_learning": self.power_learning.stored()}
 
     @callback
     def _state_changed(self, event):

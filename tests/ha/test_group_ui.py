@@ -180,6 +180,7 @@ async def test_group_member_local_forms_do_not_edit_shared_policy(hass):
     assert {str(k) for k in form["data_schema"].schema} == {
         "estimated_ac_power", "power_accounting", "power_margin_percent",
         "power_settle_seconds", "ac_power_entity",
+        "power_learning_enabled",
     }
     before = repository.registry.group(group_id)
     result = await submit(hass, form, {"estimated_ac_power": 1200})

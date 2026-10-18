@@ -10,6 +10,7 @@ from ..domain.groups import GroupConfig, MemberPolicy, Membership
 from ..domain.types import DeviceConfig, EnergySnapshot
 from ..manual import pause_active
 from ..model import evaluate
+from .learning import effective_policy
 from .sources import read_sources
 
 
@@ -40,6 +41,7 @@ def capture_group(
         settings = {**coordinator.settings, **asdict(group.policy), **asdict(group.sources)}
         settings["load_includes_ac"] = group.policy.load_scope == "includes_all_members"
         member_policy = MemberPolicy.from_settings(settings)
+        member_policy = effective_policy(coordinator, group, members, member_policy, now.timestamp())
         if member_policy.power_accounting == "estimated":
             settings["ac_power_entity"] = None
         source = read_sources(

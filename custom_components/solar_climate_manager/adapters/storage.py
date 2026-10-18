@@ -109,7 +109,8 @@ def restore_runtime(
         signature = dict(signature)
         # Missing new parameters mean the unchanged pre-estimation behavior.
         for key, default in (("power_accounting", "legacy"), ("power_margin_percent", 20),
-                             ("power_settle_seconds", 120)):
+                             ("power_settle_seconds", 120), ("power_learning_enabled", False),
+                             ("power_learning_generation", "")):
             if key in settings:
                 signature.setdefault(key, default)
     if signature == settings:

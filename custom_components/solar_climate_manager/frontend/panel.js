@@ -26,6 +26,9 @@ const TEXT = {
     integration: "Відкрити інтеграцію", mode: "Режим роботи", on: "Увімкнено", off: "Вимкнено",
     lastUpdate: "Оновлено", finish: "Готово", sessionLost: "Не вдалося перевірити результат збереження. Оновіть дані перед повторною дією.",
     availableHint: "Бюджет цієї групи; показники різних пристроїв групи не підсумовуються.",
+    learning: "Уточнення потужності", configured: "Задана оцінка", learned: "Навчена оцінка",
+    samples: "Прийняті цикли", consistent: "Узгоджені спостереження", insufficient: "Недостатньо даних",
+    resetLearning: "Скинути навчання",
   },
   en: {
     subtitle: "Air conditioners and a shared energy budget", groups: "Energy groups",
@@ -51,6 +54,9 @@ const TEXT = {
     mode: "Operation mode", on: "On", off: "Off", lastUpdate: "Updated", finish: "Done",
     sessionLost: "Could not verify whether the change was saved. Refresh the data before repeating the action.",
     availableHint: "This group's budget; do not add together the readings of its members.",
+    learning: "Power learning", configured: "Configured estimate", learned: "Learned estimate",
+    samples: "Accepted cycles", consistent: "Consistent observations", insufficient: "Insufficient data",
+    resetLearning: "Reset learning",
   },
 };
 
@@ -241,6 +247,12 @@ export class SolarClimatePanel extends HTMLElement {
       const value=el("div"); value.append(el("div",this.t(key),"subtle"),el("strong",text)); values.append(value);
     }
     card.append(values);
+    if (device.learning?.enabled) {
+      const learned=device.learning;
+      card.append(el("p",`${this.t(learned.source)} · ${this.t(learned.confidence)} · ${this.t("samples")}: ${learned.samples}`,"subtle"));
+      const status=this._labels?.selector?.learning_status?.options?.[learned.status] || learned.status;
+      card.append(el("p",`${this.t("learning")}: ${status}${learned.learned_watts===null?"":` · ${this.watts(learned.learned_watts)}`}`,"subtle"));
+    }
     const action=this.stateText(device.group_id?"group_action":"strategy_action",device.action);
     const reason=this.stateText(device.group_id?"group_reason":"strategy_reason",device.reason);
     card.append(el("p",`${action} · ${reason}`,"reason"));
@@ -261,6 +273,8 @@ export class SolarClimatePanel extends HTMLElement {
     }
     if (device.group_id) {
       actions.append(this.button(this.t("rename"),()=>this.startFlow(device,"group_member")),this.button(this.t("leave"),()=>this.startFlow(device,"group_leave")));
+      const reset=this.button(this.t("resetLearning"),()=>this.startFlow(device,"learning_reset"));
+      reset.disabled=!device.loaded;actions.append(reset);
     } else {
       const join=this.button(this.t("join"),()=>this.startFlow(device,"group_join"));join.disabled=!this._data.groups.length || !!this._data.error;actions.append(join);
     }

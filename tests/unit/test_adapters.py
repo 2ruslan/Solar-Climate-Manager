@@ -161,6 +161,12 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(restored.policy.soc_blocked)
         self.assertFalse(restored.observed.running)
         self.assertEqual(restored.observed.last_stop, 200)
+
+    def test_pre_learning_settings_preserve_cycle_deadlines(self):
+        for key in ("power_learning_enabled", "power_learning_generation"):
+            self.saved["policy_signature"].pop(key)
+        restored = storage.restore_runtime(self.saved, settings=self.settings, options={}, now=200)
+        self.assertEqual(restored.observed, models.ObservedDeviceState(True, 100, 50))
         self.assertEqual(self.saved["policy_signature"]["target_temperature"], 23)
 
     def test_legacy_upgrade_preserves_observed_cycle_without_enabling_estimation(self):

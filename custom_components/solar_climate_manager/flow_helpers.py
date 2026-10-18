@@ -71,6 +71,8 @@ def settings_schema(values, keys):
 
 
 def validate(hass, data):
+    if type(data.get("power_learning_enabled", False)) is not bool:
+        return "invalid_member_policy"
     try:
         MemberPolicy.from_settings(data)
     except ValueError as error:
