@@ -23,7 +23,7 @@ from .settings import configuration_values
 PANEL_PATH = "solar-climate-manager"
 ASSET_PATH = "/solar_climate_manager_static"
 PANEL_KEY = f"{DOMAIN}.panel"
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 
 async def async_setup_panel_api(hass):

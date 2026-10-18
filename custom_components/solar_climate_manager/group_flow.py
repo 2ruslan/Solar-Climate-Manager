@@ -197,7 +197,18 @@ class GroupOptionsMixin:
                 if state.membership(self.device_id):
                     raise ValueError("device_already_grouped")
                 name = group_name(user_input["name"])
-                self._draft = {"name": name, "priority": priority(user_input["priority"])}
+                values = self.values()
+                self._draft = {
+                    "name": name,
+                    "priority": priority(user_input["priority"]),
+                    "sources": {
+                        **{k: values.get(k) for k in SHARED_SOURCE_KEYS},
+                        **{k: values[k] for k in GROUP_FLAGS},
+                        "load_scope": "includes_all_members" if values["load_includes_ac"]
+                        else "excludes_all_members",
+                    },
+                    "policy": {k: values[k] for k in POLICY_KEYS},
+                }
                 return await self.async_step_group_sources()
             except (ValueError, OSError, HomeAssistantError) as error:
                 errors["base"] = flow_error(error)
@@ -329,6 +340,9 @@ class GroupOptionsMixin:
                 )
             except (ValueError, OSError, HomeAssistantError) as error:
                 errors["base"] = flow_error(error)
+            # Optional fields omitted by the form were deliberately cleared.
+            # Do not reintroduce a device's suggested source after validation fails.
+            values.update({k: user_input.get(k) for k in SHARED_SOURCE_KEYS})
             values.update(user_input)
         schema = settings_schema(values, set(SHARED_SOURCE_KEYS) | GROUP_FLAGS)
         fields = dict(schema.schema)
@@ -344,7 +358,7 @@ class GroupOptionsMixin:
         draft = getattr(self, "_draft", None)
         group = None
         if draft is not None:
-            values = asdict(GroupPolicy())
+            values = {**asdict(GroupPolicy()), **draft.get("policy", {})}
         else:
             try:
                 _, _, group = await self._selected()

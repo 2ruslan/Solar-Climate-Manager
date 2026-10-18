@@ -143,7 +143,7 @@
           "name": "Group name",
           "priority": "Priority (larger wins)"
         },
-        "description": "Group changes apply to all members. Device mode is preserved."
+        "description": "Group changes apply to all members. Device mode is preserved. Shared sources and compatible policy settings will be prefilled from this device. Review them in the next steps: the total load meter must include or exclude every air conditioner in the new group."
       },
       "group_member": {
         "title": "Name and priority",

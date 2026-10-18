@@ -4,6 +4,7 @@ import importlib
 import types
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import test_coordinator as boundaries
 
@@ -47,6 +48,8 @@ for name in ["NumberSelectorConfig", "SelectSelectorConfig", "EntitySelectorConf
 module("homeassistant.helpers", selector=selector)
 module("probatio", Schema=Schema, Required=Marker, Optional=Marker)
 flow_module = importlib.import_module("scm_adapter_test.config_flow")
+group_module = importlib.import_module("scm_adapter_test.group_flow")
+groups = importlib.import_module("scm_adapter_test.domain.groups")
 
 
 class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
@@ -57,6 +60,76 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.flow = flow_module.SolarClimateOptionsFlow()
         self.flow.hass = self.hass
         self.flow.config_entry = self.entry
+
+    async def new_group(self):
+        self.hass.data = {}
+        self.flow._registry = AsyncMock(return_value=groups.GroupRegistry())
+        self.flow._group_form = lambda step, schema, values, errors=None: {
+            "step_id": step, "values": values, "errors": errors or {},
+        }
+        return await self.flow.async_step_group_create({"name": "House", "priority": 3})
+
+    async def test_group_creation_copies_effective_settings_and_keeps_local_parameters(self):
+        self.entry.options.update({
+            "minimum_soc": 71, "restart_soc": 83, "grid_absence_minutes": 17,
+            "battery_positive": "charge", "grid_positive": "export",
+            "grid_on_means_available": False, "load_includes_battery_charging": True,
+            "forecast_power_now_entity": None, "load_includes_ac": False,
+            "estimated_ac_power": 1500, "target_temperature": 25,
+        })
+        original = dict(self.entry.options)
+        form = await self.new_group()
+        values = form["values"]
+        self.assertEqual(values["load_power_entity"], "sensor.house")
+        self.assertEqual(values["battery_positive"], "charge")
+        self.assertEqual(values["grid_positive"], "export")
+        self.assertFalse(values["grid_on_means_available"])
+        self.assertTrue(values["load_includes_battery_charging"])
+        self.assertIsNone(values["forecast_power_now_entity"])
+        self.assertEqual(values["load_scope"], "excludes_all_members")
+        self.assertNotIn("estimated_ac_power", values)
+        self.assertNotIn("temperature_entity", values)
+        form = await self.flow.async_step_group_sources(values)
+        self.assertEqual(form["values"]["minimum_soc"], 71)
+        self.assertEqual(form["values"]["restart_soc"], 83)
+        self.assertEqual(form["values"]["grid_absence_delay"], 1020)
+        self.assertEqual(self.entry.options, original)
+
+    async def test_group_creation_honors_edits_and_does_not_restore_cleared_sources(self):
+        form = await self.new_group()
+        values = dict(form["values"])
+        self.assertEqual(values["load_scope"], "includes_all_members")
+        values.pop("soc_entity")
+        values.pop("forecast_power_now_entity")
+        form = await self.flow.async_step_group_sources(values)
+        self.assertEqual(form["errors"]["base"], "incomplete_sources")
+        self.assertIsNone(form["values"]["soc_entity"])
+        self.assertIsNone(form["values"]["forecast_power_now_entity"])
+        values = {**form["values"], "soc_entity": "sensor.soc", "load_scope": "excludes_all_members"}
+        form = await self.flow.async_step_group_sources(values)
+        self.assertEqual(form["step_id"], "group_policy")
+        result = []
+
+        async def commit(change, devices):
+            result.append(change(groups.GroupRegistry()))
+            return {"type": "create_entry"}
+
+        self.flow._commit = commit
+        policy = {**form["values"], "minimum_soc": 72, "restart_soc": 84}
+        self.assertEqual((await self.flow.async_step_group_policy(policy))["type"], "create_entry")
+        group = result[0].groups[0]
+        self.assertIsNone(group.sources.forecast_power_now_entity)
+        self.assertEqual(group.policy.load_scope, "excludes_all_members")
+        self.assertEqual(group.policy.minimum_soc, 72)
+        self.assertEqual(group.policy.restart_soc, 84)
+        self.assertEqual(result[0].membership(self.flow.device_id).group_id, group.group_id)
+
+    async def test_group_creation_missing_sources_are_not_invented(self):
+        self.entry.options.update({key: None for key in groups.SHARED_SOURCE_KEYS})
+        form = await self.new_group()
+        self.assertTrue(all(form["values"][key] is None for key in groups.SHARED_SOURCE_KEYS))
+        result = await self.flow.async_step_group_sources(form["values"])
+        self.assertEqual(result["errors"]["base"], "incomplete_sources")
 
     async def test_menu_and_separate_advanced_form(self):
         result = await self.flow.async_step_init()
