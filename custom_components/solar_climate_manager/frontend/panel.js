@@ -29,6 +29,10 @@ const TEXT = {
     learning: "Уточнення потужності", configured: "Задана оцінка", learned: "Навчена оцінка",
     samples: "Прийняті цикли", consistent: "Узгоджені спостереження", insufficient: "Недостатньо даних",
     resetLearning: "Скинути навчання",
+    history: "Історія та діагностика", exportHistory: "Завантажити JSON", time: "Час",
+    decision: "Рішення / причина", command: "Команда / помилка", actual: "Фактичний стан",
+    historyHint: "До 24 годин / 3000 записів на пристрій. Збір працює із закритою сторінкою; перезапуск HA або перезавантаження інтеграції очищає історію. Таблиця: останні 200 записів; JSON: усі доступні записи. Час — локальний для браузера. Рішення не є підтвердженням виконання команди.",
+    historyEmpty: "Історія ще не накопичена.",
   },
   en: {
     subtitle: "Air conditioners and a shared energy budget", groups: "Energy groups",
@@ -57,6 +61,10 @@ const TEXT = {
     learning: "Power learning", configured: "Configured estimate", learned: "Learned estimate",
     samples: "Accepted cycles", consistent: "Consistent observations", insufficient: "Insufficient data",
     resetLearning: "Reset learning",
+    history: "History and diagnostics", exportHistory: "Download JSON", time: "Time",
+    decision: "Decision / reason", command: "Command / error", actual: "Actual state",
+    historyHint: "Up to 24 hours / 3000 records per device. Collection continues with the page closed; HA restart or integration reload clears history. Table: latest 200 records; JSON: all available records. Times use the browser time zone. Decisions do not confirm command execution.",
+    historyEmpty: "No history collected yet.",
   },
 };
 
@@ -91,6 +99,7 @@ const STYLE = `
   .device { padding:18px 0; border-top:1px solid var(--divider-color,#e4eae7); } .device:first-child { border-top:0; } .device-top { display:flex; gap:12px; align-items:flex-start; } .badge { font-size:12px; padding:5px 9px; border-radius:20px; background:var(--secondary-background-color,#eff5f1); display:inline-block; } .values { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:14px 0; } .values strong { display:block; margin-top:5px; font-size:16px; } .reason { margin:8px 0 14px; } .empty { border:1px dashed var(--divider-color,#dce5df); border-radius:14px; padding:24px; margin:16px 0; color:var(--secondary-text-color,#61756b); }
   .notice { padding:12px 16px; border-radius:10px; background:var(--secondary-background-color,#eff5f1); margin:12px 0; line-height:1.5; } .error { color:var(--error-color,#b93e3e); } #status:empty,#notice:empty { display:none; } .section { margin-top:30px; } select,input { border:1px solid var(--divider-color,#c9d7ce); color:var(--primary-text-color,#20352f); background:var(--card-background-color,#fff); border-radius:8px; min-height:42px; padding:9px; max-width:100%; } .mode { min-width:190px; } a { color:var(--primary-color,#22876c); }
   dialog { border:1px solid var(--divider-color,#dce5df); border-radius:16px; padding:0; width:min(620px,calc(100vw - 24px)); max-height:calc(100dvh - 32px); color:var(--primary-text-color,#20352f); background:var(--card-background-color,#fff); } dialog::backdrop { background:rgba(15,30,25,.5); } .dialog-body { padding:24px; } .dialog-head { display:flex; align-items:center; gap:12px; margin-bottom:12px; } form { display:grid; gap:16px; margin-top:18px; } label { display:grid; gap:7px; font-size:14px; } label.check { display:flex; align-items:center; gap:10px; } input[type=checkbox] { min-height:22px; width:22px; } .form-actions { display:flex; justify-content:flex-end; gap:10px; position:sticky; bottom:0; background:var(--card-background-color,#fff); padding:12px 0 0; } .menu { display:grid; gap:10px; margin-top:18px; } .menu button { text-align:start; } .field-error { font-size:13px; } .footer { margin:20px 0; }
+  dialog.history { width:min(1200px,calc(100vw - 24px)); } .history-scroll { overflow:auto; max-height:60vh; margin-top:16px; } table { border-collapse:collapse; width:100%; font-size:13px; } th,td { text-align:start; padding:10px; border-bottom:1px solid var(--divider-color,#dce5df); min-width:120px; } th { position:sticky; top:0; background:var(--card-background-color,#fff); }
   @media(max-width:700px) { header { padding:12px; } h1 { font-size:18px; } main { padding:16px 12px; } .group { padding:16px; } .metrics { gap:7px; } .metric { padding:10px; } .metric strong { font-size:18px; } .values { grid-template-columns:1fr 1fr; } .values>div:last-child { grid-column:1/-1; } .actions { gap:7px; } .dialog-body { padding:18px; } .summary { gap:20px; } .device-top { flex-wrap:wrap; } }
   @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; } }
 `;
@@ -268,6 +277,8 @@ export class SolarClimatePanel extends HTMLElement {
       finally { mode.blur();this._signature=null;await this.refresh(); }
     });
     actions.append(mode);
+    const history=this.button(this.t("history"),()=>this.showHistory(device));
+    history.disabled=!device.loaded; actions.append(history);
     for (const [key,step] of [["comfort","comfort"],["energy","energy"],["settings","init"]]) {
       const button=this.button(this.t(key),()=>this.startFlow(device,step));button.disabled=!device.loaded;actions.append(button);
     }
@@ -282,7 +293,44 @@ export class SolarClimatePanel extends HTMLElement {
     if (device.edit_block) card.append(el("p",this.errorText(device.edit_block),"subtle"));
     return card;
   }
+  async showHistory(device) {
+    const body=this._openDialog(`${this.t("history")} · ${device.name}`,this.t("historyHint"));
+    this._dialog.classList.add("history");
+    const status=el("p",this.t("loading")); body.append(status);
+    try {
+      const result=await this._hass.callWS({type:"solar_climate_manager/history",entry_id:device.entry_id});
+      if (!body.isConnected || !this._dialog.open) return;
+      status.textContent=`${result.rows.length} · ${this.t("lastUpdate")}: ${new Date(result.generated_at*1000).toLocaleString(this._lang)}`;
+      const actions=el("div",null,"actions");
+      actions.append(this.button(this.t("refresh"),()=>this.showHistory(device)),this.button(this.t("exportHistory"),()=>{
+        const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:"application/json"}));
+        const link=el("a");link.href=url;link.download="solar-climate-history.json";body.append(link);link.click();link.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }));body.append(actions);
+      if (!result.rows.length) { body.append(el("p",this.t("historyEmpty")));return; }
+      const scroll=el("div",null,"history-scroll");scroll.tabIndex=0;
+      const table=el("table");const head=el("thead");const titles=el("tr");
+      for (const key of ["time","mode","temperature","actual","measured","available","reserve","decision","command"]) {
+        const th=el("th",this.t(key));th.scope="col";titles.append(th);
+      }
+      head.append(titles);table.append(head);const rows=el("tbody");
+      const value=v=>v===null || v===undefined?this.t("missing"):String(v);
+      for (const row of result.rows.slice(-200).reverse()) {
+        const s=row.state;const tr=el("tr");
+        if (s.command_failed || s.group_command_status==="failed" || s.invalid_data || s.energy_data_invalid) tr.className="error";
+        const grouped=s.group_action && s.group_action!=="independent";
+        const cells=[new Date(row.timestamp*1000).toLocaleString(this._lang),this.stateText("operation_mode",s.automation_mode),
+          `${value(s.temperature)} / ${value(s.target_temperature)} °C`,s.running===true?this.t("on"):s.running===false?this.t("off"):this.t("missing"),
+          s.power_accounting==="estimated"?this.t("missing"):this.watts(s.ac_power),this.watts(s.group_available_power),this.watts(s.group_reserved_power),
+          `${value(grouped?s.group_action:s.strategy_action)} / ${value(grouped?s.group_reason:s.strategy_reason)}`,
+          `${value(s.group_command_status)} / ${value(s.command_error)}`];
+        cells.forEach(cell=>tr.append(el("td",cell)));rows.append(tr);
+      }
+      table.append(rows);scroll.append(table);body.append(scroll);
+    } catch { if (body.isConnected) status.textContent=this.t("failed"); }
+  }
   _openDialog(title, description) {
+    this._dialog.classList.remove("history");
     this._dialog.replaceChildren();
     const body=el("div",null,"dialog-body");
     const heading=el("div",null,"dialog-head");const h=el("h2",title,"grow");h.id="dialog-title";

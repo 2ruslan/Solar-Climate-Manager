@@ -176,3 +176,27 @@ async def test_concurrent_priority_edit_is_detected(hass, hass_client):
     stale = await post(client, f"{BASE}/{old['flow_id']}", {"name": "House", "priority": 2})
     assert stale["errors"]["base"] == "configuration_changed"
     assert repository.registry.membership(first.runtime_data.device_id).priority == 4
+
+
+async def test_history_is_admin_only_read_only_and_handles_unload(
+    hass, hass_ws_client, hass_read_only_access_token,
+):
+    first = await setup(hass)
+    client = await hass_ws_client(hass)
+    request = {"type": f"{DOMAIN}/history", "entry_id": first.entry_id}
+    with patch.object(type(hass.services), "async_call") as calls:
+        await client.send_json_auto_id(request)
+        response = await client.receive_json()
+        assert response["success"]
+        result = response["result"]
+        assert result["entry_id"] == first.entry_id
+        assert result["rows"]
+        assert "temperature" in result["rows"][-1]["state"]
+        assert result["max_rows"] == 3000
+        calls.assert_not_called()
+    readonly = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+    await readonly.send_json_auto_id(request)
+    assert (await readonly.receive_json())["error"]["code"] == "unauthorized"
+    assert await hass.config_entries.async_unload(first.entry_id)
+    await client.send_json_auto_id(request)
+    assert (await client.receive_json())["error"]["code"] == "not_loaded"

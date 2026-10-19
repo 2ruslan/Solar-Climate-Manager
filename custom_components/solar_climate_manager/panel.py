@@ -18,6 +18,7 @@ from .const import DEFAULTS, DOMAIN, REMOVED_SETTINGS
 from .domain.groups import MemberPolicy
 from .flow_helpers import vol
 from .group_flow import ensure_editable
+from .history import MAX_AGE, MAX_ROWS
 from .settings import configuration_values
 
 PANEL_PATH = "solar-climate-manager"
@@ -42,6 +43,7 @@ async def async_setup_panel_api(hass):
     ])
     hass.data[PANEL_KEY] = {"translations": labels, "lock": asyncio.Lock(), "registered": False}
     websocket_api.async_register_command(hass, websocket_overview)
+    websocket_api.async_register_command(hass, websocket_history)
 
 
 async def async_show_panel(hass):
@@ -154,3 +156,24 @@ async def websocket_overview(hass, connection, msg):
         lang = "uk" if msg["language"].startswith("uk") else "en"
         result["translations"] = hass.data[PANEL_KEY]["translations"][lang]
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/history",
+    vol.Required("entry_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_history(hass, connection, msg):
+    entry = next((entry for entry in hass.config_entries.async_entries(DOMAIN)
+                  if entry.entry_id == msg["entry_id"]), None)
+    coordinator = getattr(entry, "runtime_data", None)
+    if not entry or entry.state is not ConfigEntryState.LOADED or not coordinator:
+        connection.send_error(msg["id"], "not_loaded", "Device is not loaded")
+        return
+    now = dt_util.utcnow().timestamp()
+    connection.send_result(msg["id"], {
+        "version": VERSION, "entry_id": entry.entry_id,
+        "generated_at": now, "max_age_seconds": MAX_AGE,
+        "max_rows": MAX_ROWS, "rows": coordinator.history.read(now),
+    })

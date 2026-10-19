@@ -13,6 +13,7 @@ from .adapters.storage import create_store
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .domain.learning import PowerLearning
 from .domain.types import DeviceConfig
+from .history import DiagnosticHistory
 from .manual import control_fingerprint
 from .presentation import build_state
 from .runtime.commands import CommandExecutor
@@ -27,6 +28,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass, entry):
         super().__init__(hass, LOGGER, name=DOMAIN, config_entry=entry, always_update=False)
+        self.history = DiagnosticHistory()
         self.group_observer = None
         self.group_manager = None
         self.entry = entry
@@ -40,6 +42,11 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.commands = CommandExecutor(
             hass, entry, self.runtime, lambda: self.data, self._evaluate, self._publish_command_error
         )
+
+    @callback
+    def async_set_updated_data(self, data):
+        self.history.record(dt_util.utcnow().timestamp(), data, self.settings)
+        super().async_set_updated_data(data)
 
     async def async_initialize(self):
         saved = await self.store.async_load()
@@ -131,6 +138,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             if self.data is None or self.data.get("reason") != decision.reason:
                 LOGGER.debug("Entry %s: %s", self.entry.entry_id, decision.reason)
             self.async_set_updated_data(data)
+        self.history.record(now.timestamp(), data, settings)
         self.commands.schedule()
         if self.group_manager is not None:
             self.group_manager.request_evaluation()
