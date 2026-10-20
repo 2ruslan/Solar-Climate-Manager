@@ -24,7 +24,7 @@ from ..domain.allocator import (
     allocate,
     reconcile,
 )
-from ..domain.groups import GroupConfig, GroupRegistry, UnresolvedReservation
+from ..domain.groups import GroupConfig, GroupRegistry, MemberPolicy, UnresolvedReservation
 from ..group_presentation import group_metrics
 from ..manual import control_fingerprint, pause_active
 
@@ -611,6 +611,8 @@ class GroupManager:
         if group is None:
             return data
         data["group_name"] = group.name[:255]
+        policy = MemberPolicy.from_settings(coordinator.settings)
+        data["effective_power_accounting"] = policy.power_accounting
         result = self.results.get(group.group_id)
         snapshot = self.snapshots.get(group.group_id)
         if result is not None and snapshot is not None:
@@ -654,7 +656,7 @@ class GroupManager:
                 if reserve.phase == "uncertain" or reserve.command_id not in self.issued
                 else "service_pending"
                 if attempt and attempt.service_status == "pending"
-                else ("awaiting_stabilization" if coordinator.settings.get("power_accounting") == "estimated" else "awaiting_meter")
+                else ("awaiting_stabilization" if policy.power_accounting == "estimated" else "awaiting_meter")
                 if attempt and attempt.confirmed_at is not None
                 else "awaiting_confirmation"
             )

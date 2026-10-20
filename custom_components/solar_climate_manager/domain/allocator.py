@@ -562,6 +562,19 @@ def allocate(
             deficit = max(0.0, deficit - (request.watts or 0))
     # Stop proposals do not free measured power in this cycle.
     available = max(0.0, budget) if budget is not None else None
+    # Forecasts guide new starts, never confirm physical commands or invent
+    # present capacity. Account for a predicted PV drop over the whole horizon.
+    forecast_available = available
+    if (
+        available is not None
+        and _valid(energy.pv)
+        and energy.forecasts
+        and all(_valid(value) for value in energy.forecasts)
+        and (not energy.grid or energy.grid_limit_configured and energy.grid_import_limit != 0)
+    ):
+        assert energy.pv is not None
+        forecast_pv = min(value for value in energy.forecasts if value is not None)
+        forecast_available = max(0.0, available - max(0.0, energy.pv - forecast_pv))
     reservations = list(state.reservations)
     active = {r.device_id for r in reservations if r.phase != "accounted"}
     confirmations = dict(state.confirmations)
@@ -591,6 +604,8 @@ def allocate(
                 why = "telemetry_unsettled"
             elif incremental > available:
                 why = "insufficient_budget"
+            elif forecast_available is not None and incremental > forecast_available:
+                why = "forecast_deficit"
             else:
                 since = confirmations.get(request.device_id, now)
                 next_confirmations.append((request.device_id, since))
@@ -606,6 +621,8 @@ def allocate(
                     why = "minimum_off" if off_left >= confirmation_left else "start_confirmation"
                 else:
                     available -= incremental
+                    if forecast_available is not None:
+                        forecast_available -= incremental
                     new_reserved += incremental
                     # Replace an old accounted cycle only when a fresh start is proposed.
                     reservations = [r for r in reservations if r.device_id != request.device_id]

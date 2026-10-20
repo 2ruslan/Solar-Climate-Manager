@@ -110,9 +110,11 @@ async def test_estimated_form_validation_and_live_or_pending_changes_blocked(has
         assert result["errors"]["base"] == "switch_to_observation"
 
 
-async def test_estimated_reload_recovers_via_off_then_new_aggregate(hass, freezer):
+@pytest.mark.parametrize("accounting", ["estimated", "legacy"])
+async def test_estimated_reload_recovers_via_off_then_new_aggregate(hass, freezer, accounting):
     first, second, repository, _ = await prepare(hass)
-    assert (await configure(hass, first, power_settle_seconds=120))["type"] == "create_entry"
+    assert (await configure(hass, first, power_accounting=accounting,
+                            power_settle_seconds=120))["type"] == "create_entry"
     await hass.async_block_till_done()
     records = []
 
@@ -130,6 +132,7 @@ async def test_estimated_reload_recovers_via_off_then_new_aggregate(hass, freeze
         await hass.async_block_till_done()
         assert [r[0] for r in records] == ["set_temperature", "set_hvac_mode"]
         assert repository.registry.unresolved[0].command_id == token
+        assert first.runtime_data.data["effective_power_accounting"] == "estimated"
         assert first.runtime_data.group_manager.desired(first.runtime_data.device_id) is False
         freezer.tick(timedelta(seconds=1))
         report(hass, records[-1], "off")

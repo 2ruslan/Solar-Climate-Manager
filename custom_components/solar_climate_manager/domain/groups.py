@@ -166,7 +166,7 @@ class MemberPolicy:
 
     @classmethod
     def from_settings(cls, settings: dict[str, Any]) -> "MemberPolicy":
-        return cls(
+        policy = cls(
             **{
                 key: settings[key]
                 for key in (
@@ -181,6 +181,11 @@ class MemberPolicy:
                 if key in settings
             }
         )
+        # Old installations without a meter use aggregate-backed estimation.
+        # A configured but unavailable meter must never silently become an estimate.
+        if policy.power_accounting == "legacy" and not policy.ac_power_entity:
+            return replace(policy, power_accounting="estimated", power_margin_percent=0)
+        return policy
 
 
 @dataclass(frozen=True)

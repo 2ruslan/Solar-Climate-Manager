@@ -73,7 +73,7 @@ def learning_view(coordinator: Any, now: float) -> dict[str, Any]:
     supported = bool(
         group
         and group.policy.load_scope == "includes_all_members"
-        and settings.get("power_accounting") == "estimated"
+        and MemberPolicy.from_settings(settings).power_accounting == "estimated"
     )
     learning = coordinator.power_learning
     if group and registry:

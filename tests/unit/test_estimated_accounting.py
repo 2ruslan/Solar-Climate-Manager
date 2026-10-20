@@ -128,8 +128,8 @@ class EstimatedAccountingTests(unittest.TestCase):
         _, pending, _ = a.reconcile(replace(self.snapshot, requests=(request,)), self.state, self.policy)
         self.assertEqual(pending, 0)
 
-    def test_policy_validation_and_legacy_default(self):
-        self.assertEqual(groups.MemberPolicy.from_settings({}).power_accounting, "legacy")
+    def test_policy_validation_and_meterless_legacy_fallback(self):
+        self.assertEqual(groups.MemberPolicy.from_settings({}).power_accounting, "estimated")
         self.assertEqual(groups.MemberPolicy.from_settings({}).planned_watts, 900)
         for update in ({"power_accounting": "unknown"}, {"power_accounting": "meter"},
                        {"power_margin_percent": -1}, {"power_margin_percent": 101},
@@ -137,3 +137,61 @@ class EstimatedAccountingTests(unittest.TestCase):
                        {"power_settle_seconds": True}, {"estimated_ac_power": 0}):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 groups.MemberPolicy.from_settings(update)
+
+    def test_legacy_without_meter_recovers_existing_stop_then_starts(self):
+        member = groups.MemberPolicy.from_settings({
+            "power_accounting": "legacy", "estimated_ac_power": 1000,
+            "power_settle_seconds": 30, "minimum_off_time": 0,
+        })
+        request = replace(self.request, policy=member, running=False,
+                          command_confirmed_at=None, state_observed_at=1010)
+        reserve = replace(self.reserve, watts=1000, phase="uncertain", stop_sent_at=1005)
+        state = replace(self.state, reservations=(reserve,))
+        energy = replace(self.snapshot.energy, grid=True, soc=81, pv=1810, load=687,
+                         grid_limit_configured=True, grid_import_limit=2000, grid_power=86,
+                         forecasts=(2149, 2453, 2660))
+        snapshot = replace(self.snapshot, requests=(request,), energy=energy,
+                           grid_reported_at=1040)
+        result = a.allocate(snapshot, state, self.policy, shadow=False)
+        self.assertEqual(result.decisions[0].action, "start")
+        self.assertEqual(result.reserved_watts, 1000)  # Old reserve released, new one admitted.
+        self.assertEqual(result.available_watts, 914)
+        for stale in (replace(snapshot, load_reported_at=1030),
+                      replace(snapshot, grid_reported_at=1030),
+                      replace(snapshot, requests=(replace(request, state_observed_at=1004),))):
+            with self.subTest(snapshot=stale):
+                self.assertEqual(a.allocate(stale, state, self.policy).decisions[0].action, "wait")
+
+    def test_legacy_configured_meter_never_falls_back_when_missing(self):
+        member = groups.MemberPolicy.from_settings({
+            "power_accounting": "legacy", "ac_power_entity": "sensor.ac",
+        })
+        self.assertEqual(member.power_accounting, "legacy")
+        request = replace(self.request, policy=member, measured_watts=None)
+        result = a.allocate(replace(self.snapshot, requests=(request,)), self.state, self.policy)
+        self.assertEqual(result.reason, "incomplete_members")
+
+    def test_forecast_guides_starts_without_overriding_current_capacity(self):
+        request = replace(self.request, running=False)
+        for grid in (False, True):
+            energy = replace(self.snapshot.energy, grid=grid, pv=3000, load=800,
+                             grid_limit_configured=True, grid_import_limit=3000, grid_power=800)
+            snapshot = replace(self.snapshot, requests=(request,), energy=energy,
+                               grid_reported_at=1040)
+            for forecasts, expected in (
+                ((3000, 3200, 3500), "start"),
+                ((3000, 2500, 1500), "wait"),
+                ((None, None, None), "start"),
+                ((3000, float("nan"), 3500), "start"),
+            ):
+                with self.subTest(grid=grid, forecasts=forecasts):
+                    result = a.allocate(replace(snapshot, energy=replace(energy, forecasts=forecasts)),
+                                        a.AllocationState("g"), self.policy, shadow=False)
+                    self.assertEqual(result.decisions[0].action, expected)
+                    if expected == "wait":
+                        self.assertEqual(result.decisions[0].reason, "forecast_deficit")
+            # A good forecast cannot fund a start which exceeds present headroom.
+            result = a.allocate(replace(snapshot, energy=replace(
+                energy, pv=1000, grid_power=2800, forecasts=(5000, 5000, 5000))),
+                a.AllocationState("g"), self.policy, shadow=False)
+            self.assertEqual(result.decisions[0].reason, "insufficient_budget")

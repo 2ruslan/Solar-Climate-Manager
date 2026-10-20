@@ -272,7 +272,7 @@
     },
     "power_accounting": {
       "options": {
-        "legacy": "Legacy behavior (0.5.0)",
+        "legacy": "Automatic: meter or configured power",
         "meter": "Individual power meter",
         "estimated": "Estimated electrical power"
       }
@@ -519,6 +519,7 @@
           "unresolved_reservation": "Unresolved reservation",
           "telemetry_unsettled": "Telemetry unsettled",
           "insufficient_budget": "Insufficient budget",
+          "forecast_deficit": "Forecast solar power is insufficient for a new start",
           "minimum_off": "Minimum off",
           "start_confirmation": "Start confirmation",
           "observation": "Observation",
