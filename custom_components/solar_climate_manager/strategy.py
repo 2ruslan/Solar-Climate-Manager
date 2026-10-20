@@ -138,10 +138,6 @@ def decide(
         state.grid_absent_since = None
         return halt("invalid_energy_data")
 
-    if snapshot.grid and state.soc_blocked and snapshot.battery > cfg.max_battery_discharge:
-        energy_reason = "battery_discharge"
-        return halt(energy_reason)
-
     if snapshot.grid and snapshot.grid_limit_configured and snapshot.grid_import_limit != 0:
         limit = snapshot.grid_import_limit
         if limit is None or not isfinite(limit) or limit < 0:
@@ -157,6 +153,18 @@ def decide(
         if grid_import_margin < 0:
             energy_reason = "grid_import_limit"
             return halt(energy_reason)
+
+    # A validated grid budget can supply the AC even while the inverter chooses
+    # to discharge the battery for other loads. Keep the fallback protection
+    # when no finite import budget is configured.
+    if (
+        snapshot.grid
+        and grid_import_margin is None
+        and state.soc_blocked
+        and snapshot.battery > cfg.max_battery_discharge
+    ):
+        energy_reason = "battery_discharge"
+        return halt(energy_reason)
 
     if snapshot.grid:
         state.grid_absent_since = None

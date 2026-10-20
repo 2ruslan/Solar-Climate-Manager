@@ -447,6 +447,9 @@ def allocate(
     elif (
         energy.grid
         and blocked
+        # With an explicit import limit, the shared grid budget below decides
+        # which members can run regardless of the inverter's battery dispatch.
+        and not (energy.grid_limit_configured and energy.grid_import_limit != 0)
         and energy.battery is not None
         and energy.battery > policy.max_battery_discharge
     ):

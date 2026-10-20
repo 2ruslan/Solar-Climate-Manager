@@ -56,6 +56,52 @@ class AllocatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             a.allocate(self.snapshot, result.state, self.policy, shadow=False)
 
+    def test_low_soc_discharge_uses_shared_grid_budget(self):
+        energy = replace(
+            self.energy, grid=True, soc=82, battery=488, pv=0, load=454,
+            grid_power=20, grid_limit_configured=True, grid_import_limit=1000,
+        )
+        result = self.run_allocation(energy=energy, grid_reported_at=1000)
+        self.assertEqual(
+            self.actions(result),
+            {"a": ("start", "grid_ready"), "b": ("wait", "insufficient_budget")},
+        )
+        self.assertTrue(result.state.soc_blocked)
+        self.assertEqual(result.available_watts, 80)
+        self.assertEqual(result.shadow_reserved_watts, 900)
+
+    def test_low_soc_discharge_preserves_invalid_grid_budget_checks(self):
+        energy = replace(
+            self.energy, grid=True, soc=82, battery=488,
+            grid_power=20, grid_limit_configured=True, grid_import_limit=2000,
+        )
+        for changes, reason in (
+            ({"grid_power": None}, "grid_power_unavailable"),
+            ({"grid_import_limit": None}, "grid_limit_unavailable"),
+        ):
+            with self.subTest(reason=reason):
+                result = self.run_allocation(energy=replace(energy, **changes))
+                self.assertEqual(self.actions(result)["a"], ("wait", reason))
+
+    def test_low_soc_grid_running_member_still_obeys_limit_and_outage(self):
+        running = replace(self.requests[0], running=True, measured_watts=900, last_start=999)
+        energy = replace(
+            self.energy, grid=True, soc=82, battery=488, load=1400,
+            grid_power=920, grid_limit_configured=True, grid_import_limit=2000,
+        )
+        result = self.run_allocation(requests=(running,), energy=energy)
+        self.assertEqual(self.actions(result)["a"][0], "continue")
+        for changes, reason in (
+            ({"grid_power": 2001}, "grid_import_limit"),
+            ({"grid": False}, "low_soc"),
+            ({"grid_import_limit": 0}, "battery_discharge"),
+        ):
+            with self.subTest(reason=reason):
+                stopped = self.run_allocation(
+                    requests=(running,), energy=replace(energy, **changes),
+                )
+                self.assertEqual(self.actions(stopped)["a"], ("stop", reason))
+
     def test_priority_is_deterministic_and_request_order_independent(self):
         result = self.run_allocation(requests=(self.requests[1], self.requests[0]))
         self.assertEqual(result, self.run_allocation())

@@ -165,6 +165,38 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(result.action, "stop")
         self.assertEqual(result.energy_reason, "battery_discharge")
 
+    def test_grid_budget_allows_start_and_run_during_soc_recovery(self):
+        grid = replace(
+            self.snapshot, grid=True, soc=82, battery=488, pv=0, load=454,
+            grid_power=20, grid_limit_configured=True, grid_import_limit=2000,
+        )
+        result = self.decide(0, grid)
+        self.assertEqual(result.action, "start")
+        self.assertEqual(result.energy_reason, "grid_ready")
+        self.assertTrue(result.energy_allowed)
+        self.assertEqual(result.grid_import_margin, 1080)
+        self.assertTrue(self.state.soc_blocked)
+        self.assertEqual(self.decide(1, replace(grid, soc=86)).action, "continue")
+        # Grid permission does not clear battery protection for a later outage.
+        result = self.decide(2, replace(grid, grid=False, soc=86))
+        self.assertEqual(result.action, "stop")
+        self.assertEqual(result.energy_reason, "soc_recovery")
+
+    def test_low_soc_discharge_does_not_mask_grid_budget_failures(self):
+        grid = replace(
+            self.snapshot, grid=True, soc=82, battery=488,
+            grid_power=20, grid_limit_configured=True, grid_import_limit=2000,
+        )
+        for changes, reason in (
+            ({"grid_power": 1101}, "grid_import_limit"),
+            ({"grid_power": None}, "grid_power_unavailable"),
+            ({"grid_import_limit": None}, "grid_limit_unavailable"),
+        ):
+            with self.subTest(reason=reason):
+                result = self.decide(0, replace(grid, **changes))
+                self.assertFalse(result.energy_allowed)
+                self.assertEqual(result.energy_reason, reason)
+
     def test_missing_battery_soc_grid_or_temperature_blocks(self):
         for field in ("soc", "battery", "grid"):
             self.assertEqual(
