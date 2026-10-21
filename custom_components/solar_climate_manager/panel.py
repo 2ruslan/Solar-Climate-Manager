@@ -1,6 +1,7 @@
 """Admin panel and read-only overview; mutations use HA's existing flow APIs."""
 
 import asyncio
+import hashlib
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -38,10 +39,15 @@ async def async_setup_panel_api(hass):
                 for lang in ("en", "uk")}
 
     labels = await hass.async_add_executor_job(translations)
+    script = await hass.async_add_executor_job((root / "frontend" / "panel.js").read_bytes)
+    asset_revision = hashlib.sha256(script).hexdigest()[:16]
     await hass.http.async_register_static_paths([
         StaticPathConfig(ASSET_PATH, str(root / "frontend"), cache_headers=False),
     ])
-    hass.data[PANEL_KEY] = {"translations": labels, "lock": asyncio.Lock(), "registered": False}
+    hass.data[PANEL_KEY] = {
+        "translations": labels, "lock": asyncio.Lock(), "registered": False,
+        "asset_revision": asset_revision,
+    }
     websocket_api.async_register_command(hass, websocket_overview)
     websocket_api.async_register_command(hass, websocket_history)
 
@@ -54,7 +60,7 @@ async def async_show_panel(hass):
         await panel_custom.async_register_panel(
             hass, frontend_url_path=PANEL_PATH, webcomponent_name="solar-climate-panel",
             sidebar_title="Solar Climate Manager", sidebar_icon="mdi:home-thermometer-outline",
-            module_url=f"{ASSET_PATH}/panel.js?v={VERSION}", require_admin=True,
+            module_url=f"{ASSET_PATH}/panel.js?v={state['asset_revision']}", require_admin=True,
             config_panel_domain=DOMAIN,
         )
         state["registered"] = True

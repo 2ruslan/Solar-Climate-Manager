@@ -33,6 +33,10 @@ const TEXT = {
     decision: "Рішення / причина", command: "Команда / помилка", actual: "Фактичний стан",
     historyHint: "До 24 годин / 3000 записів на пристрій. Збір працює із закритою сторінкою; перезапуск HA або перезавантаження інтеграції очищає історію. Таблиця: останні 200 записів; JSON: усі доступні записи. Час — локальний для браузера. Рішення не є підтвердженням виконання команди.",
     historyEmpty: "Історія ще не накопичена.",
+    trends: "Температура та потужність", runningCount: "Працюють зараз", unavailableCount: "Недоступні",
+    actualTemperature: "Температура", targetTemperature: "Ціль", powerChart: "Виміряне споживання",
+    chartHint: "До 24 годин / 3000 записів. Історія очищається після перезапуску HA або інтеграції. Пропуски понад 5 хв не з’єднуються.",
+    chartEmpty: "За цей період немає вимірювань.", hours: "год", estimatedHint: "Для розрахункового обліку графік виміряної потужності недоступний.",
   },
   en: {
     subtitle: "Air conditioners and a shared energy budget", groups: "Energy groups",
@@ -65,6 +69,10 @@ const TEXT = {
     decision: "Decision / reason", command: "Command / error", actual: "Actual state",
     historyHint: "Up to 24 hours / 3000 records per device. Collection continues with the page closed; HA restart or integration reload clears history. Table: latest 200 records; JSON: all available records. Times use the browser time zone. Decisions do not confirm command execution.",
     historyEmpty: "No history collected yet.",
+    trends: "Temperature and power", runningCount: "Running now", unavailableCount: "Unavailable",
+    actualTemperature: "Temperature", targetTemperature: "Target", powerChart: "Measured consumption",
+    chartHint: "Up to 24 hours / 3000 records. HA or integration restart clears history. Gaps over 5 minutes are not connected.",
+    chartEmpty: "No measurements in this period.", hours: "h", estimatedHint: "Measured power history is unavailable with estimated accounting.",
   },
 };
 
@@ -111,6 +119,12 @@ function el(tag, text, cls) {
 }
 
 const STYLE = `
+  .trends { margin:16px 0; padding:14px; border-radius:12px; background:var(--secondary-background-color,#eff5f1); }
+  .chart-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:16px; margin-top:14px; }
+  .chart { min-width:0; margin:0; } .chart svg { display:block; width:100%; height:auto; }
+  .chart-legend { display:flex; flex-wrap:wrap; gap:12px; font-size:12px; }
+  .chart-legend span::before { content:""; display:inline-block; width:16px; margin-right:5px; border-top:3px solid var(--series-color); vertical-align:middle; }
+  .chart-legend span.target::before { border-top-style:dashed; }
   .inline-settings { margin-top:12px; border:1px solid var(--divider-color,#dce5df); border-radius:10px; }
   .inline-settings>summary { padding:14px 16px; cursor:pointer; font-weight:600; }
   .inline-body { padding:0 16px; max-width:900px; }
@@ -142,6 +156,8 @@ export class SolarClimatePanel extends HTMLElement {
     this._flow = null;
     this._inlineEditors = new Set();
     this._fieldId = 0;
+    this._chartCache = new Map();
+    this._chartHours = 6;
     this._visibility = () => { if (!document.hidden) this.refresh(); };
   }
   set hass(value) {
@@ -213,6 +229,7 @@ export class SolarClimatePanel extends HTMLElement {
       if (signature !== this._signature && !this._inlineEditors.size && !["INPUT","SELECT"].includes(focused?.tagName)) {
         this._signature=signature; this._renderOverview();
       }
+      for(const chart of this._overview.querySelectorAll(".trends"))chart.refreshTrend?.();
     } catch (error) { this._status.textContent=error.code === "unauthorized" ? this.t("admin") : this.t("lost"); }
     finally { this._refreshing=false; }
   }
@@ -221,7 +238,7 @@ export class SolarClimatePanel extends HTMLElement {
     const content=el("div");
     const toolbar=el("div",null,"toolbar");
     const stats=el("div",null,"summary");
-    for (const [count,key] of [[data.groups.length,"groups"],[data.devices.length,"devices"],[data.devices.filter(d=>!d.group_id).length,"independent"]]) {
+    for (const [count,key] of [[data.groups.length,"groups"],[data.devices.length,"devices"],[data.devices.filter(d=>!d.group_id).length,"independent"],[data.devices.filter(d=>d.loaded && d.running===true).length,"runningCount"],[data.devices.filter(d=>!d.loaded).length,"unavailableCount"]]) {
       const stat=el("div",null,"subtle"); stat.append(el("strong",count),el("span",this.t(key))); stats.append(stat);
     }
     const actions=el("div",null,"actions");
@@ -318,6 +335,7 @@ export class SolarClimatePanel extends HTMLElement {
     }
     card.append(actions);
     if (device.edit_block) card.append(el("p",this.errorText(device.edit_block),"subtle"));
+    if (device.loaded) card.append(this.deviceTrends(device));
     if (device.loaded) for (const name of (device.group_id ? ["comfort","consumption"] : ["comfort","grid","battery","solar","consumption"])) {
       card.append(this.inlineSettings(device, name, false));
     }
@@ -326,6 +344,82 @@ export class SolarClimatePanel extends HTMLElement {
       if(device.group_id)card.append(this.inlineSettings(device,"rename",false,"group_member"));
     }
     return card;
+  }
+  deviceTrends(device) {
+    const host=el("section",null,"trends");
+    const heading=el("div",null,"heading");heading.append(el("h3",this.t("trends")));
+    const range=el("select");range.setAttribute("aria-label",`${this.t("trends")}: ${device.name}`);
+    for(const hours of [1,6,24]) {const option=el("option",`${hours} ${this.t("hours")}`);option.value=hours;range.append(option);}
+    range.value=this._chartHours;
+    heading.append(range);host.append(heading,el("p",this.t("chartHint"),"subtle"));
+    const body=el("div");host.append(body);
+    const render=result=>{
+      body.replaceChildren();
+      const end=result.generated_at,start=end-Number(range.value)*3600;
+      const rows=result.rows.filter(row=>Number.isFinite(row.timestamp) && row.timestamp>=start && row.timestamp<=end).sort((a,b)=>a.timestamp-b.timestamp);
+      const grid=el("div",null,"chart-grid");
+      grid.append(this.trendChart(rows,start,end,this.t("actualTemperature"),"°C",[
+        {label:this.t("actualTemperature"),color:"var(--primary-color,#22876c)",value:s=>s.temperature},
+        {label:this.t("targetTemperature"),color:"var(--primary-text-color,#20352f)",value:s=>s.target_temperature,dashed:true},
+      ]));
+      grid.append(this.trendChart(rows,start,end,this.t("powerChart"),"W",[
+        {label:this.t("measured"),color:"var(--primary-color,#22876c)",value:s=>s.power_accounting==="estimated"?null:s.ac_power},
+      ]));
+      body.append(grid);
+      if(device.power_accounting==="estimated")body.append(el("p",this.t("estimatedHint"),"subtle"));
+      body.append(el("p",`${this.t("lastUpdate")}: ${new Date(end*1000).toLocaleTimeString(this._lang)}`,"subtle"));
+    };
+    const load=async()=>{
+      body.replaceChildren(el("p",this.t("loading"),"subtle"));
+      let cached=this._chartCache.get(device.entry_id);
+      if(!cached || Date.now()-cached.at>60000) {
+        cached={at:Date.now(),promise:this._hass.callWS({type:"solar_climate_manager/history",entry_id:device.entry_id})};
+        this._chartCache.set(device.entry_id,cached);
+      }
+      try {const result=await cached.promise;if(host.isConnected)render(result);}
+      catch {
+        if(this._chartCache.get(device.entry_id)===cached)this._chartCache.delete(device.entry_id);
+        if(host.isConnected)body.replaceChildren(el("p",this.t("failed"),"error"),this.button(this.t("retry"),load));
+      }
+    };
+    range.addEventListener("change",()=>{this._chartHours=Number(range.value);load();});
+    host.refreshTrend=()=>{const cached=this._chartCache.get(device.entry_id);if(cached && Date.now()-cached.at>60000)load();};
+    // Wait until the new overview is attached before applying asynchronous results.
+    queueMicrotask(load);
+    return host;
+  }
+  trendChart(rows,start,end,title,unit,series) {
+    const figure=el("figure",null,"chart");figure.append(el("figcaption",`${title} · ${unit}`));
+    const values=rows.flatMap(row=>series.map(item=>item.value(row.state))).filter(Number.isFinite);
+    if(!values.length) {figure.append(el("p",this.t("chartEmpty"),"subtle"));return figure;}
+    let min=Math.min(...values),max=Math.max(...values);
+    if(unit==="W")min=Math.min(0,min);
+    if(min===max){min-=1;max+=1;}
+    const svgNode=(tag,attrs,text)=>{const node=document.createElementNS("http://www.w3.org/2000/svg",tag);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,value);if(text!==undefined)node.textContent=text;return node;};
+    const svg=svgNode("svg",{viewBox:"0 0 480 190",role:"img","aria-label":`${title}: ${min.toLocaleString(this._lang)}–${max.toLocaleString(this._lang)} ${unit}`});
+    const x=time=>54+(time-start)/(end-start)*412,y=value=>150-(value-min)/(max-min)*130;
+    for(const value of [min,(min+max)/2,max]) {
+      svg.append(svgNode("line",{x1:54,x2:466,y1:y(value),y2:y(value),stroke:"var(--divider-color,#c9d7ce)"}));
+      svg.append(svgNode("text",{x:48,y:y(value)+4,"text-anchor":"end",fill:"currentColor","font-size":11},value.toLocaleString(this._lang,{maximumFractionDigits:1})));
+    }
+    const legend=el("div",null,"chart-legend");
+    for(const item of series) {
+      let path="",previous=null;
+      for(const row of rows) {
+        const value=item.value(row.state);
+        if(!Number.isFinite(value)){previous=null;continue;}
+        path+=`${previous!==null && row.timestamp-previous<=300?"L":"M"}${x(row.timestamp).toFixed(2)},${y(value).toFixed(2)} `;
+        previous=row.timestamp;
+        if(rows.length<=120 || row===rows.at(-1)) {
+          const dot=svgNode("circle",{cx:x(row.timestamp),cy:y(value),r:2,fill:item.color});
+          dot.append(svgNode("title",{},`${new Date(row.timestamp*1000).toLocaleString(this._lang)} · ${item.label}: ${value} ${unit}`));svg.append(dot);
+        }
+      }
+      svg.append(svgNode("path",{d:path,fill:"none",stroke:item.color,"stroke-width":2,...(item.dashed?{"stroke-dasharray":"6 4"}:{})}));
+      const label=el("span",item.label,item.dashed?"target":"");label.style.setProperty("--series-color",item.color);legend.append(label);
+    }
+    for(const [time,anchor] of [[start,"start"],[end,"end"]])svg.append(svgNode("text",{x:x(time),y:178,"text-anchor":anchor,fill:"currentColor","font-size":11},new Date(time*1000).toLocaleTimeString(this._lang,{hour:"2-digit",minute:"2-digit"})));
+    figure.append(svg,legend);return figure;
   }
   inlineSettings(device, name, shared, step=null) {
     const host=el("details",null,"inline-settings");

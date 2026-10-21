@@ -1,5 +1,6 @@
 """Real panel lifecycle, authenticated APIs, serialized forms and stale edits."""
 
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -40,7 +41,9 @@ async def test_panel_registers_once_and_survives_partial_unload(hass):
     first, second, _, _ = await setup_shadow_group(hass)
     panel = hass.data[DATA_PANELS][PANEL_PATH]
     assert panel.require_admin is True
-    assert panel.config["_panel_custom"]["module_url"].startswith(ASSET_PATH)
+    script = Path("custom_components/solar_climate_manager/frontend/panel.js").read_bytes()
+    revision = hashlib.sha256(script).hexdigest()[:16]
+    assert panel.config["_panel_custom"]["module_url"] == f"{ASSET_PATH}/panel.js?v={revision}"
     assert await hass.config_entries.async_unload(first.entry_id)
     assert hass.data[DATA_PANELS][PANEL_PATH] is panel
     assert await hass.config_entries.async_unload(second.entry_id)
