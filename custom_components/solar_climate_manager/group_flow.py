@@ -178,7 +178,7 @@ class GroupOptionsMixin:
             return self.async_abort(reason="group_store_unavailable")
         member = state.membership(self.device_id)
         choices = (
-            ["group_member", "group_sources", "group_policy", "group_leave"]
+            ["group_member", "group_settings", "group_sources", "group_policy", "group_leave"]
             if member
             else ["group_join", "group_create"]
         )
@@ -309,6 +309,46 @@ class GroupOptionsMixin:
         return self._group_form(
             "group_member", member_schema(group.name, member.priority), user_input or {}, errors
         )
+
+    async def async_step_group_settings(self, user_input=None):
+        """Edit shared sources and their policy together under one revision guard."""
+        try:
+            _, _, group = await self._selected()
+        except (ValueError, OSError, HomeAssistantError):
+            return self.async_abort(reason="configuration_changed")
+        values = {**asdict(group.sources), **asdict(group.policy)}
+        if user_input is None:
+            await self._remember_group(group)
+        errors = {}
+        if user_input is not None:
+            try:
+                sources = GroupSources(**{k: user_input.get(k) for k in SHARED_SOURCE_KEYS})
+                validate_group_sources(self.hass, sources)
+                policy = replace(group.policy, **{
+                    k: user_input[k] for k in POLICY_KEYS | GROUP_FLAGS | {"load_scope"}
+                })
+                return await self._edit_group(
+                    self._original,
+                    lambda state: state.update(replace(group, sources=sources, policy=policy)),
+                )
+            except (ValueError, OSError, HomeAssistantError) as error:
+                errors["base"] = flow_error(error)
+            values.update({k: user_input.get(k) for k in SHARED_SOURCE_KEYS})
+            values.update(user_input)
+        fields = dict(settings_schema(values, set(SHARED_SOURCE_KEYS) | GROUP_FLAGS).schema)
+        fields[vol.Required("load_scope", default=values["load_scope"])] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=["includes_all_members", "excludes_all_members"],
+                translation_key="load_scope",
+            )
+        )
+        for key in sorted(POLICY_KEYS):
+            fields[vol.Required(key, default=values[key])] = number(
+                maximum=100 if key in ("minimum_soc", "restart_soc") else 86400,
+                unit="%" if key in ("minimum_soc", "restart_soc") else
+                "W" if key == "max_battery_discharge" else "s",
+            )
+        return self._group_form("group_settings", vol.Schema(fields), values, errors)
 
     async def async_step_group_sources(self, user_input=None):
         draft = getattr(self, "_draft", None)

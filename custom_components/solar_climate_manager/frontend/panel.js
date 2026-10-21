@@ -70,6 +70,12 @@ const TEXT = {
 
 export const fieldDefault = (field) => field.description?.suggested_value ?? field.default;
 export const fieldKind = (field) => Object.keys(field.selector || {})[0] || field.type;
+const SHARED_SECTIONS = {
+  grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay", "grid_max_data_age"],
+  battery: ["soc_entity", "minimum_soc", "restart_soc", "battery_power_entity", "battery_positive", "max_battery_discharge"],
+  solar: ["pv_power_entity", "forecast_power_now_entity", "forecast_power_30m_entity", "forecast_power_60m_entity", "start_delay", "shortage_delay"],
+  consumption: ["load_power_entity", "load_scope", "load_includes_battery_charging", "power_max_data_age"],
+};
 export function formDefaults(fields) {
   const result = {};
   for (const field of fields) {
@@ -105,6 +111,12 @@ function el(tag, text, cls) {
 }
 
 const STYLE = `
+  .inline-settings { margin-top:12px; border:1px solid var(--divider-color,#dce5df); border-radius:10px; }
+  .inline-settings>summary { padding:14px 16px; cursor:pointer; font-weight:600; }
+  .inline-body { padding:0 16px; max-width:900px; }
+  .inline-body form { margin:0 0 16px; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
+  .inline-body .form-actions,.inline-body .error { grid-column:1/-1; }
+  @media(max-width:700px) { .inline-body form { grid-template-columns:1fr; } }
   :host { display:block; height:100%; color:var(--primary-text-color,#20352f); background:var(--primary-background-color,#f4f7f5); font-family:var(--paper-font-body1_-_font-family,Roboto,Arial,sans-serif); }
   * { box-sizing:border-box; } .page { height:100%; overflow:auto; } header { position:sticky; top:0; z-index:2; background:var(--card-background-color,#fff); border-bottom:1px solid var(--divider-color,#e0e8e3); padding:16px 24px; display:flex; align-items:center; gap:12px; }
   h1 { font-size:21px; margin:0 0 4px; font-weight:650; } h2 { font-size:20px; margin:0; } h3 { font-size:17px; margin:0; overflow-wrap:anywhere; } p { margin:6px 0; line-height:1.5; } .subtle { color:var(--secondary-text-color,#61756b); font-size:13px; } .grow { flex:1; min-width:0; }
@@ -128,6 +140,8 @@ export class SolarClimatePanel extends HTMLElement {
     this._refreshing = false;
     this._dialogBusy = false;
     this._flow = null;
+    this._inlineEditors = new Set();
+    this._fieldId = 0;
     this._visibility = () => { if (!document.hidden) this.refresh(); };
   }
   set hass(value) {
@@ -149,6 +163,7 @@ export class SolarClimatePanel extends HTMLElement {
     clearInterval(this._timer);
     document.removeEventListener("visibilitychange", this._visibility);
     this._cancelFlow();
+    for (const editor of this._inlineEditors) editor.cancel();
   }
   _init() {
     this._shell = true;
@@ -185,7 +200,7 @@ export class SolarClimatePanel extends HTMLElement {
   async refresh() {
     if (!this._hass || !this._shell || !this.isConnected || this._refreshing) return;
     this._title.replaceChildren(el("h1","Solar Climate Manager"),el("div",this.t("subtitle"),"subtle"));
-    if (!this._hass.user?.is_admin) { this._status.textContent=this.t("admin"); this._overview.replaceChildren(); return; }
+    if (!this._hass.user?.is_admin) { for (const editor of this._inlineEditors) editor.cancel(); this._status.textContent=this.t("admin"); this._overview.replaceChildren(); return; }
     this._refreshing=true;
     try {
       const data = await this._hass.callWS({type:"solar_climate_manager/overview",language:this._lang,include_translations:!this._labels});
@@ -195,7 +210,7 @@ export class SolarClimatePanel extends HTMLElement {
       this._status.textContent=data.error ? this.errorText(data.error) : "";
       const signature=JSON.stringify(data);
       const focused=this.shadowRoot.activeElement;
-      if (signature !== this._signature && !["INPUT","SELECT"].includes(focused?.tagName)) {
+      if (signature !== this._signature && !this._inlineEditors.size && !["INPUT","SELECT"].includes(focused?.tagName)) {
         this._signature=signature; this._renderOverview();
       }
     } catch (error) { this._status.textContent=error.code === "unauthorized" ? this.t("admin") : this.t("lost"); }
@@ -240,9 +255,6 @@ export class SolarClimatePanel extends HTMLElement {
     const actions=el("div",null,"actions");
     actions.append(this.button(this.t("join"),()=>this.chooseDevice("group_join",group.group_id)));
     const representative=this._data.devices.find(d=>d.group_id===group.group_id && d.loaded);
-    if (representative) {
-      for (const [key,step] of [["rename","group_member"],["sources","group_sources"],["policy","group_policy"]]) actions.append(this.button(this.t(key),()=>this.startFlow(representative,step)));
-    }
     if (!group.members.length) {
       const entry=this._data.devices.find(d=>d.loaded);
       const remove=this.button(this.t("remove"),()=>this.startFlow(entry,"group_delete",{group_id:group.group_id}),"danger");
@@ -251,6 +263,9 @@ export class SolarClimatePanel extends HTMLElement {
     }
     card.append(actions);
     if (group.edit_block) card.append(el("p",this.errorText(group.edit_block),"subtle reason"));
+    if (representative) for (const name of Object.keys(SHARED_SECTIONS)) {
+      card.append(this.inlineSettings(representative, name, true));
+    }
     const members=el("div");
     for (const member of group.members) {
       const device=this._data.devices.find(d=>d.device_id===member.device_id);
@@ -294,11 +309,8 @@ export class SolarClimatePanel extends HTMLElement {
     actions.append(mode);
     const history=this.button(this.t("history"),()=>this.showHistory(device));
     history.disabled=!device.loaded; actions.append(history);
-    for (const [key,step] of [["settings","init"],["reconfigure","reconfigure"]]) {
-      const button=this.button(this.t(key),()=>this.startFlow(device,step));button.disabled=!device.loaded;actions.append(button);
-    }
     if (device.group_id) {
-      actions.append(this.button(this.t("rename"),()=>this.startFlow(device,"group_member")),this.button(this.t("leave"),()=>this.startFlow(device,"group_leave")));
+      actions.append(this.button(this.t("leave"),()=>this.startFlow(device,"group_leave")));
       const reset=this.button(this.t("resetLearning"),()=>this.startFlow(device,"learning_reset"));
       reset.disabled=!device.loaded;actions.append(reset);
     } else {
@@ -306,7 +318,87 @@ export class SolarClimatePanel extends HTMLElement {
     }
     card.append(actions);
     if (device.edit_block) card.append(el("p",this.errorText(device.edit_block),"subtle"));
+    if (device.loaded) for (const name of (device.group_id ? ["comfort","consumption"] : ["comfort","grid","battery","solar","consumption"])) {
+      card.append(this.inlineSettings(device, name, false));
+    }
+    if(device.loaded) {
+      card.append(this.inlineSettings(device,"reconfigure",false,"reconfigure"));
+      if(device.group_id)card.append(this.inlineSettings(device,"rename",false,"group_member"));
+    }
     return card;
+  }
+  inlineSettings(device, name, shared, step=null) {
+    const host=el("details",null,"inline-settings");
+    const title=step?this.t(name):this._labels?.options?.step?.init?.sections?.[name]?.name || name;
+    host.append(el("summary",title));
+    const body=el("div",null,"inline-body");host.append(body);
+    const config=step==="reconfigure";
+    const base=`config/config_entries/${config?"":"options/"}flow`;
+    const editor={host,flow:null,busy:false,closed:false,cancel:async()=>{
+      editor.closed=true;this._inlineEditors.delete(editor);
+      const flow=editor.flow;editor.flow=null;
+      if(flow?.flow_id && !["create_entry","abort"].includes(flow.type)) {
+        try {await this._hass.callApi("DELETE",`${base}/${flow.flow_id}`);} catch { /* Expired flow. */ }
+      }
+    }};
+    const close=async()=>{await editor.cancel();host.open=false;body.replaceChildren();this._signature=null;this.refresh();};
+    const render=()=>{
+      const flow=editor.flow;
+      body.replaceChildren();
+      if(flow.type!=="form") {
+        body.append(el("p",this.errorText(flow.reason),"error"),this.button(this.t("close"),close));return;
+      }
+      const labels=this._labels[config?"config":"options"].step[step || (shared?"group_settings":"init")];
+      const fields=step?flow.data_schema:shared ? SHARED_SECTIONS[name].map(key=>flow.data_schema.find(f=>f.name===key)).filter(Boolean) :
+        flow.data_schema.find(f=>f.name===name)?.schema || [];
+      const fieldLabels=shared || step?labels:labels.sections[name];
+      const form=el("form");let supported=fields.length>0;
+      if(flow.errors?.base)form.append(el("p",this.errorText(flow.errors.base),"error"));
+      for(const field of fields) {
+        const rendered=this.renderField(field,fieldLabels,flow.errors || {},{});
+        if(rendered)form.append(rendered);else supported=false;
+      }
+      if(!supported)form.append(el("p",this.t("unknownField"),"error"));
+      const actions=el("div",null,"form-actions");
+      const save=el("button",this.t("save"),"primary");save.type="submit";save.disabled=!supported;
+      actions.append(this.button(this.t("cancel"),close),save);form.append(actions);body.append(form);
+      form.addEventListener("submit",async event=>{
+        event.preventDefault();if(editor.busy || !form.reportValidity())return;
+        const input=formDefaults(flow.data_schema);
+        const changed=readForm(fields,form);
+        if(shared || step) {
+          for(const field of fields)delete input[field.name];
+          Object.assign(input,changed);
+        } else {input[name]=changed;input.settings_action="save";}
+        editor.busy=true;form.querySelectorAll("button,input,select").forEach(node=>node.disabled=true);
+        try {
+          editor.flow=await this._hass.callApi("POST",`${base}/${flow.flow_id}`,input);
+          if(editor.closed)return;
+          if(editor.flow.type==="create_entry" || editor.flow.type==="abort" && editor.flow.reason==="reconfigure_successful") {
+            this._notice.textContent=this.t("saved");await close();
+          } else render();
+        } catch {
+          body.replaceChildren(el("p",this.t("sessionLost"),"error"),this.button(this.t("close"),close));
+        } finally {editor.busy=false;}
+      });
+    };
+    host.addEventListener("toggle",async()=>{
+      if(!host.open) {if(editor.busy && !editor.closed){host.open=true;return;}await editor.cancel();return;}
+      if(this._inlineEditors.has(editor))return;
+      editor.closed=false;editor.busy=true;this._inlineEditors.add(editor);
+      body.replaceChildren(el("p",this.t("loading")));
+      try {
+        editor.flow=await this._hass.callApi("POST",base,config?{handler:"solar_climate_manager",entry_id:device.entry_id}:{handler:device.entry_id});
+        if((shared || step?.startsWith("group_")) && !editor.closed) {
+          editor.flow=await this._hass.callApi("POST",`${base}/${editor.flow.flow_id}`,{...formDefaults(editor.flow.data_schema),settings_action:"group"});
+          if(editor.flow.type==="menu")editor.flow=await this._hass.callApi("POST",`${base}/${editor.flow.flow_id}`,{next_step_id:step || "group_settings"});
+        }
+        if(editor.closed || !host.isConnected){await editor.cancel();return;}
+        render();
+      } catch {body.replaceChildren(el("p",this.t("failed"),"error"),this.button(this.t("close"),close));}
+      finally {editor.busy=false;}
+    });
+    return host;
   }
   async showHistory(device) {
     const body=this._openDialog(`${this.t("history")} · ${device.name}`,this.t("historyHint"));
@@ -435,7 +527,7 @@ export class SolarClimatePanel extends HTMLElement {
     form.addEventListener("submit",event=>{event.preventDefault();if(form.reportValidity())this.submitFlow(readForm(flow.data_schema || [],form));});
     body.append(form);
   }
-  renderField(field,labels,errors) {
+  renderField(field,labels,errors,prefill=this._prefill) {
     if (Array.isArray(field.schema)) {
       const group=el("details");
       group.open=!field.collapsed;
@@ -444,7 +536,7 @@ export class SolarClimatePanel extends HTMLElement {
       const content=el("div");content.style.cssText="display:grid;gap:16px;padding:16px 0";
       if(sectionLabels.description)content.append(el("p",sectionLabels.description,"subtle"));
       for(const child of field.schema) {
-        const rendered=this.renderField(child,sectionLabels,errors);
+        const rendered=this.renderField(child,sectionLabels,errors,prefill);
         if(!rendered)return null;
         content.append(rendered);
       }
@@ -455,7 +547,7 @@ export class SolarClimatePanel extends HTMLElement {
     if (!["number","text","string","boolean","select","entity"].includes(kind)) return null;
     const label=el("label",null,kind==="boolean"?"check":"");
     const text=labels.data?.[field.name] || field.name;
-    const value=this._prefill?.[field.name] ?? fieldDefault(field);
+    const value=prefill?.[field.name] ?? fieldDefault(field);
     let input;
     if (kind==="select") {
       input=el("select");
@@ -470,7 +562,7 @@ export class SolarClimatePanel extends HTMLElement {
       if(kind==="number") {for(const key of ["min","max","step"]) if(selector[key]!==undefined) input[key]=selector[key];}
       if(kind==="text" || kind==="string") input.maxLength=255;
       if(kind==="entity") {
-        const list=el("datalist");list.id=`entities-${field.name}`;input.setAttribute("list",list.id);input.placeholder=this.t("chooseEntity");
+        const list=el("datalist");list.id=`entities-${++this._fieldId}`;input.setAttribute("list",list.id);input.placeholder=this.t("chooseEntity");
         let filters=selector.filter || [{domain:selector.domain,device_class:selector.device_class}];if(!Array.isArray(filters))filters=[filters];
         for(const state of Object.values(this._hass.states || {})) {
           if(!filters.some(f=>(!f.domain || (Array.isArray(f.domain)?f.domain:[f.domain]).includes(state.entity_id.split(".")[0])) && (!f.device_class || (Array.isArray(f.device_class)?f.device_class:[f.device_class]).includes(state.attributes.device_class))))continue;

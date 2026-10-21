@@ -130,6 +130,17 @@ async def test_panel_assets_and_http_group_wizard_share_existing_operations(hass
     flow = await start(client, first, "energy")
     forms["energy"] = flow
     assert (await client.delete(f"{BASE}/{flow['flow_id']}")).status == 200
+    flow = await start(client, first, "group_settings")
+    forms["group_settings"] = flow
+    assert (await client.delete(f"{BASE}/{flow['flow_id']}")).status == 200
+    flow = await start(client, first, "group_member")
+    forms["group_member"] = flow
+    assert (await client.delete(f"{BASE}/{flow['flow_id']}")).status == 200
+    flow = await post(client, "/api/config/config_entries/flow", {
+        "handler": DOMAIN, "entry_id": first.entry_id,
+    })
+    forms["reconfigure"] = flow
+    assert (await client.delete(f"/api/config/config_entries/flow/{flow['flow_id']}")).status == 200
     flow = await start(client, first, "learning_reset")
     forms["learning_reset"] = flow
     assert (await client.delete(f"{BASE}/{flow['flow_id']}")).status == 200

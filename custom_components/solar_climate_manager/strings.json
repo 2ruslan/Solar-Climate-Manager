@@ -187,7 +187,8 @@
           "group_sources": "Shared sources",
           "group_policy": "Group policy",
           "group_leave": "Leave group",
-          "group_delete": "Delete empty group"
+          "group_delete": "Delete empty group",
+          "group_settings": "Shared settings"
         },
         "description": "A group shares one energy budget. Select metered or estimated accounting in each member’s Energy settings. Operation modes are preserved."
       },
@@ -264,6 +265,35 @@
       "learning_reset": {
         "title": "Reset power learning",
         "description": "Clear accepted observations and the learned estimate. Configured power and learning enablement remain unchanged. Switch the device to Observation and resolve pending reservations, then confirm."
+      },
+      "group_settings": {
+        "title": "Shared settings",
+        "data": {
+          "pv_power_entity": "Actual PV power sensor",
+          "forecast_power_now_entity": "Forecast solar power now sensor",
+          "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
+          "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor",
+          "load_power_entity": "Total consumption power sensor",
+          "soc_entity": "Battery SOC sensor (%)",
+          "battery_power_entity": "Signed battery power sensor",
+          "grid_power_entity": "Signed grid import/export power sensor",
+          "grid_available_entity": "Grid availability binary sensor",
+          "grid_on_means_available": "Grid binary sensor ON means available",
+          "battery_positive": "Positive battery power means",
+          "grid_positive": "Positive grid power means",
+          "load_includes_battery_charging": "Total consumption includes battery charging",
+          "grid_import_limit_entity": "Inverter grid import limit (number, optional; 0 = unlimited)",
+          "load_scope": "Total meter coverage",
+          "minimum_soc": "Charge for stopping (%)",
+          "restart_soc": "Charge for resuming (%)",
+          "max_battery_discharge": "Allowed battery discharge at low SOC (W)",
+          "start_delay": "Stable budget before start (s)",
+          "shortage_delay": "Deficit duration before shedding (s)",
+          "grid_absence_delay": "Grid absence before overriding minimum run (s)",
+          "power_max_data_age": "Maximum power report age (s)",
+          "grid_max_data_age": "Maximum grid availability report age (s)"
+        },
+        "description": "Changes apply to every member of this energy group."
       }
     },
     "error": {

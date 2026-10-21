@@ -35,7 +35,7 @@ window.hass={language:'uk',user:{is_admin:true},connection:{},states:{
   calls.push([method,path,data]);
   if(method==='DELETE')return {};
   if(window.failWrite)throw Error('offline');
-  if(path.endsWith('/flow')){current='init';return structuredClone(data.handler==='independent'?fixture.forms.independent:fixture.forms.energy);}
+  if(path.endsWith('/flow')){if(!path.includes('/options/')){current='reconfigure';return structuredClone(fixture.forms.reconfigure);}current='init';return structuredClone(data.handler==='independent'?fixture.forms.independent:fixture.forms.energy);}
   if(data.settings_action==='group'){current='group';return menu(current);}
   if(data.settings_action==='learning_reset'){current='learning_reset';return structuredClone(fixture.forms[current]);}
   if(data.next_step_id){current=data.next_step_id;return current==='group'?menu(current):structuredClone(fixture.forms[current]);}
@@ -88,24 +88,27 @@ def main():
             page.goto(f"http://127.0.0.1:{server.server_port}")
             expect(page.get_by_role("heading", name="Будинок")).to_be_visible()
             page.screenshot(path="/tmp/scm-panel-desktop.png", full_page=True)
-            page.get_by_role("button", name="Налаштувати", exact=True).first.click()
+            page.locator(".device").first.locator("summary").filter(has_text="Споживання").click()
+            expect(page.locator("dialog")).not_to_be_visible()
+            assert page.locator('[name="settings_action"]').count() == 0
             expect(page.locator('[name="estimated_ac_power"]')).to_have_value("900")
             page.locator('[name="estimated_ac_power"]').fill("1200")
             page.locator('[name="power_accounting"]').select_option("estimated")
             page.locator('[name="power_learning_enabled"]').check()
+            page.evaluate("fixture.overview.devices[0].temperature=22;panel.refresh()")
+            expect(page.locator('[name="estimated_ac_power"]')).to_have_value("1200")
             page.screenshot(path="/tmp/scm-panel-form.png")
             page.get_by_role("button", name="Зберегти", exact=True).click()
-            expect(page.get_by_role("heading", name="Зміни збережено")).to_be_visible()
+            expect(page.locator("#notice")).to_have_text("Зміни збережено")
             saved = page.evaluate("calls.at(-1)[2]")
             assert saved["consumption"]["estimated_ac_power"] == 1200
             assert saved["consumption"]["power_accounting"] == "estimated"
             assert saved["consumption"]["power_learning_enabled"] is True
             assert "ac_power_entity" not in saved["consumption"]
             assert "temperature_entity" in saved["comfort"]
-            page.get_by_role("button", name="Готово", exact=True).click()
-            page.get_by_role("button", name="Налаштувати", exact=True).last.click()
+            page.locator(".device").last.locator("summary").filter(has_text="Мережа").click()
             for title in ("Клімат і розклад", "Мережа", "Батарея", "Сонячна генерація", "Споживання"):
-                expect(page.locator("summary").filter(has_text=title)).to_be_visible()
+                expect(page.locator(".device").last.locator("summary").filter(has_text=title)).to_be_visible()
             page.locator('[name="grid_on_means_available"]').uncheck()
             page.locator('[name="grid_positive"]').select_option("export")
             page.get_by_role("button", name="Зберегти", exact=True).click()
@@ -113,7 +116,26 @@ def main():
             assert saved["grid"]["grid_on_means_available"] is False
             assert saved["grid"]["grid_positive"] == "export"
             assert set(saved) == {"comfort", "grid", "battery", "solar", "consumption", "settings_action"}
-            page.get_by_role("button", name="Готово", exact=True).click()
+            expect(page.locator('[name="grid_positive"]')).to_have_count(0)
+            page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Батарея").click()
+            page.locator('[name="minimum_soc"]').fill("70")
+            page.get_by_role("button", name="Зберегти", exact=True).click()
+            expect(page.locator('[name="minimum_soc"]')).to_have_count(0)
+            saved = page.evaluate("calls.at(-1)[2]")
+            assert saved["minimum_soc"] == 70
+            assert saved["load_power_entity"] == "sensor.load"
+            assert "settings_action" not in saved
+            page.locator(".device").first.locator("summary").filter(has_text="Назва та пріоритет").click()
+            expect(page.locator('[name="priority"]')).to_be_visible()
+            page.locator('[name="priority"]').fill("9")
+            page.get_by_role("button", name="Зберегти", exact=True).click()
+            expect(page.locator('[name="priority"]')).to_have_count(0)
+            assert page.evaluate("calls.at(-1)[2].priority") == 9
+            page.locator(".device").first.locator("summary").filter(has_text="Змінити прив’язки").click()
+            expect(page.locator('[name="climate_entity"]')).to_have_value("climate.test")
+            page.get_by_role("button", name="Скасувати", exact=True).click()
+            expect(page.locator('[name="climate_entity"]')).to_have_count(0)
+            assert page.evaluate("calls.at(-1)[0]") == "DELETE"
             expect(page.get_by_text("Навчена оцінка · Узгоджені спостереження", exact=False)).to_be_visible()
             page.get_by_role("button", name="Скинути навчання", exact=True).first.click()
             page.get_by_role("button", name="Підтвердити", exact=True).click()
@@ -136,7 +158,8 @@ def main():
             page.get_by_role("button", name="Скасувати", exact=True).click()
             page.locator("select.mode").first.select_option("disabled")
             assert page.evaluate("calls.at(-1)[0]") == "service"
-            page.get_by_role("button", name="Налаштувати", exact=True).first.click()
+            page.locator(".device").first.locator("summary").filter(has_text="Споживання").click()
+            expect(page.locator('[name="estimated_ac_power"]')).to_be_visible()
             page.evaluate("window.failWrite=true")
             page.get_by_role("button", name="Зберегти", exact=True).click()
             expect(page.get_by_text("Не вдалося перевірити результат збереження.", exact=False)).to_be_visible()
@@ -145,6 +168,10 @@ def main():
             expect(page.get_by_text("Зв’язок із Home Assistant втрачено.", exact=False)).to_be_visible()
             page.evaluate("window.offline=false;panel.refresh()")
             page.set_viewport_size({"width": 390, "height": 844})
+            page.locator(".device").first.locator("summary").filter(has_text="Клімат і розклад").click()
+            expect(page.locator('[name="target_temperature"]')).to_be_visible()
+            assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
+            page.get_by_role("button", name="Скасувати", exact=True).click()
             page.evaluate("panel.shadowRoot.querySelector('.page').scrollTop=0")
             page.screenshot(path="/tmp/scm-panel-mobile.png", full_page=True)
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390

@@ -38,6 +38,43 @@ async def submit(hass, form, values):
     return await hass.config_entries.options.async_configure(form["flow_id"], values)
 
 
+async def test_shared_settings_save_sources_and_policy_together(hass):
+    first, _, repository, group_id = await setup_shadow_group(hass)
+    before = repository.registry.group(group_id)
+    form = await group_form(hass, first, "group_settings")
+    values = {**asdict(before.sources), **asdict(before.policy)}
+    values = {key: value for key, value in values.items() if value is not None}
+    values.update(minimum_soc=70, restart_soc=80, grid_on_means_available=False)
+    values.pop("pv_power_entity")
+    result = await submit(hass, form, values)
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    after = repository.registry.group(group_id)
+    assert after.sources.pv_power_entity is None
+    assert after.policy.minimum_soc == 70
+    assert after.policy.restart_soc == 80
+    assert after.policy.grid_on_means_available is False
+    assert after.sources.load_power_entity == before.sources.load_power_entity
+
+
+async def test_shared_settings_reject_stale_form_and_invalid_thresholds(hass):
+    first, _, repository, group_id = await setup_shadow_group(hass)
+    before = repository.registry.group(group_id)
+    old = await group_form(hass, first, "group_settings")
+    new = await group_form(hass, first, "group_settings")
+    values = {key: value for key, value in
+              {**asdict(before.sources), **asdict(before.policy)}.items() if value is not None}
+    invalid = await submit(hass, new, {**values, "minimum_soc": 90, "restart_soc": 80})
+    assert invalid["errors"]["base"] == "invalid_soc_thresholds"
+    assert repository.registry.group(group_id) == before
+    saved = await submit(hass, invalid, {**values, "minimum_soc": 70})
+    assert saved["type"] == "create_entry"
+    await hass.async_block_till_done()
+    stale = await submit(hass, old, {**values, "minimum_soc": 60})
+    assert stale["errors"]["base"] == "configuration_changed"
+    assert repository.registry.group(group_id).policy.minimum_soc == 70
+
+
 def group_sources():
     return {
         "pv_power_entity": "sensor.pv",
