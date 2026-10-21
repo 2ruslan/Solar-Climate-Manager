@@ -177,10 +177,21 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(result.grid_import_margin, 1080)
         self.assertTrue(self.state.soc_blocked)
         self.assertEqual(self.decide(1, replace(grid, soc=86)).action, "continue")
-        # Grid permission does not clear battery protection for a later outage.
+        # A running AC uses the lower threshold even with a retained SOC latch.
         result = self.decide(2, replace(grid, grid=False, soc=86))
+        self.assertEqual(result.action, "continue")
+        result = self.decide(3, replace(grid, grid=False, soc=84))
         self.assertEqual(result.action, "stop")
-        self.assertEqual(result.energy_reason, "soc_recovery")
+        self.assertEqual(result.energy_reason, "low_soc")
+
+    def test_outage_running_soc_between_thresholds_ignores_recovery_latch(self):
+        self.cfg.update(minimum_soc=78, restart_soc=85)
+        self.state = policy.PolicyState(soc_blocked=True)
+        self.observed = policy.ObservedDeviceState(running=True, last_start=0)
+        for now, soc in ((1, 80), (2, 79), (3, 78)):
+            self.assertEqual(self.decide(now, replace(self.snapshot, soc=soc)).action, "continue")
+        self.assertEqual(self.decide(4, replace(self.snapshot, soc=77)).reason, "low_soc")
+        self.assertEqual(self.decide(200, replace(self.snapshot, soc=80)).reason, "soc_recovery")
 
     def test_low_soc_discharge_does_not_mask_grid_budget_failures(self):
         grid = replace(

@@ -122,7 +122,8 @@ def decide(
         elif snapshot.soc >= cfg.restart_soc:
             state.soc_blocked = False
         if snapshot.grid is not True and (
-            state.soc_blocked or not observed_state.running and snapshot.soc < cfg.restart_soc
+            snapshot.soc < cfg.minimum_soc
+            or not observed_state.running and snapshot.soc < cfg.restart_soc
         ):
             state.soc_blocked = True
             energy_reason = "low_soc" if snapshot.soc < cfg.minimum_soc else "soc_recovery"

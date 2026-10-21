@@ -83,6 +83,21 @@ class AllocatorTests(unittest.TestCase):
                 result = self.run_allocation(energy=replace(energy, **changes))
                 self.assertEqual(self.actions(result)["a"], ("wait", reason))
 
+    def test_running_member_uses_lower_soc_threshold_with_recovery_latch(self):
+        self.policy = replace(self.policy, minimum_soc=78, restart_soc=85)
+        self.state = replace(self.state, soc_blocked=True)
+        running = replace(self.requests[0], running=True, measured_watts=900, last_start=900)
+        for soc in (80, 79, 78):
+            with self.subTest(soc=soc):
+                result = self.run_allocation(
+                    requests=(running, self.requests[1]),
+                    energy=replace(self.energy, soc=soc, load=1000, pv=3000),
+                )
+                self.assertEqual(self.actions(result)["a"], ("continue", "running"))
+                self.assertEqual(self.actions(result)["b"], ("wait", "soc_recovery"))
+        result = self.run_allocation(requests=(running,), energy=replace(self.energy, soc=77))
+        self.assertEqual(self.actions(result)["a"], ("stop", "low_soc"))
+
     def test_low_soc_grid_running_member_still_obeys_limit_and_outage(self):
         running = replace(self.requests[0], running=True, measured_watts=900, last_start=999)
         energy = replace(
@@ -316,6 +331,26 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual(second.decisions[0].action, "continue")
         third = a.allocate(replace(snapshot, now=1120), second.state, self.policy)
         self.assertEqual(third.decisions[0].action, "stop")
+
+    def test_grid_restoration_cancels_deficit_with_soc_between_thresholds(self):
+        policy = replace(self.policy, minimum_soc=78, restart_soc=85)
+        request = replace(self.requests[0], running=True, measured_watts=900, last_start=990)
+        snapshot = replace(
+            self.snapshot, requests=(request,),
+            energy=replace(self.energy, soc=80, load=1500, pv=500),
+        )
+        first = a.allocate(snapshot, replace(self.state, soc_blocked=True), policy)
+        self.assertEqual(first.decisions[0].action, "continue")
+        self.assertEqual(first.state.deficit_since, 1000)
+        restored = replace(snapshot, now=1050, energy=replace(
+            snapshot.energy, grid=True, grid_limit_configured=True,
+            grid_import_limit=2000, grid_power=1000,
+        ))
+        ready = a.allocate(restored, first.state, policy)
+        self.assertIsNone(ready.state.deficit_since)
+        self.assertIsNone(ready.state.grid_absent_since)
+        later = a.allocate(replace(restored, now=1200), ready.state, policy)
+        self.assertEqual(later.decisions[0].action, "continue")
 
     def test_low_soc_overrides_minimum_run_even_with_missing_member(self):
         running = replace(self.requests[0], running=True, measured_watts=900, last_start=999)

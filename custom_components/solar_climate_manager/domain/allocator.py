@@ -440,7 +440,8 @@ def allocate(
     ):
         reason, hard = "invalid_energy_data", True
     elif energy.grid is False and (
-        blocked or energy.soc < policy.restart_soc and not any(r.running for r in snapshot.requests)
+        energy.soc < policy.minimum_soc
+        or energy.soc < policy.restart_soc and not any(r.running for r in snapshot.requests)
     ):
         blocked = True
         reason, hard = "low_soc" if energy.soc < policy.minimum_soc else "soc_recovery", True
@@ -599,6 +600,10 @@ def allocate(
             why = "unresolved_reservation"
         elif hard or available is None:
             pass
+        elif energy.grid is False and energy.soc is not None and energy.soc < policy.restart_soc:
+            # A running member uses the lower threshold; it cannot authorize
+            # another member to start below the restart threshold.
+            why = "soc_recovery"
         else:
             incremental = max(0.0, request.policy.planned_watts - (request.watts or 0))
             # Never trust a pre-start aggregate for manually started members either.
