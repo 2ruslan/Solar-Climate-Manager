@@ -1,5 +1,7 @@
 # Solar Climate Manager
 
+<img src="custom_components/solar_climate_manager/brand/icon.png" alt="Solar Climate Manager — сонце та вентилятор" width="96" height="96">
+
 Інтеграція Home Assistant для автоматичного керування кондиціонером за кімнатною температурою, зарядом батареї, сонячним балансом і доступністю мережі. Підтримує обігрів та охолодження; кожен кондиціонер має окремий запис і налаштування. У версії **0.8.1** кілька записів можна явно об’єднати в енергетичну групу зі спільним бюджетом і пріоритетами.
 
 [![Відкрити Solar Climate Manager у HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=2ruslan&repository=Solar-Climate-Manager&category=integration)
