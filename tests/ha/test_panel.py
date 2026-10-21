@@ -7,7 +7,7 @@ from unittest.mock import patch
 from homeassistant.components.frontend import DATA_PANELS
 from homeassistant.helpers import entity_registry as er
 from test_group_ui import group_sources, policy
-from test_integration import setup, setup_shadow_group
+from test_integration import grouped_input, setup, setup_shadow_group
 
 from custom_components.solar_climate_manager.const import DOMAIN
 from custom_components.solar_climate_manager.panel import (
@@ -27,8 +27,12 @@ async def post(client, url, data):
 
 async def start(client, entry, step):
     flow = await post(client, BASE, {"handler": entry.entry_id})
-    for choice in (["group", step] if step.startswith("group_") else [step]):
-        flow = await post(client, f"{BASE}/{flow['flow_id']}", {"next_step_id": choice})
+    if step.startswith("group_") or step == "learning_reset":
+        action = "group" if step.startswith("group_") else step
+        flow = await post(client, f"{BASE}/{flow['flow_id']}",
+                          {**grouped_input(entry), "settings_action": action})
+        if step.startswith("group_"):
+            flow = await post(client, f"{BASE}/{flow['flow_id']}", {"next_step_id": step})
     return flow
 
 
@@ -99,8 +103,13 @@ async def test_panel_assets_and_http_group_wizard_share_existing_operations(hass
     asset = await client.get(f"{ASSET_PATH}/panel.js")
     assert asset.status == 200
     assert 'customElements.define("solar-climate-panel"' in await asset.text()
+    independent = await start(client, first, "init")
+    assert [field["name"] for field in independent["data_schema"]] == [
+        "comfort", "grid", "battery", "solar", "consumption", "settings_action",
+    ]
+    assert (await client.delete(f"{BASE}/{independent['flow_id']}")).status == 200
     flow = await start(client, first, "group_create")
-    forms = {"group_create": flow}
+    forms = {"group_create": flow, "independent": independent}
     schema = {f["name"]: f for f in flow["data_schema"]}
     assert schema["priority"]["selector"]["number"]["min"] == 0
     flow = await post(client, f"{BASE}/{flow['flow_id']}", {"name": "Будинок", "priority": 5})
@@ -135,10 +144,10 @@ async def test_http_cancel_and_stale_form_do_not_overwrite_settings(hass, hass_c
     client = await hass_client()
     old = await start(client, entry, "energy")
     new = await start(client, entry, "energy")
-    saved = await post(client, f"{BASE}/{new['flow_id']}", {"estimated_ac_power": 1200, "minimum_soc": 85, "restart_soc": 90})
+    saved = await post(client, f"{BASE}/{new['flow_id']}", grouped_input(entry, estimated_ac_power=1200))
     assert saved["type"] == "create_entry"
     await hass.async_block_till_done()
-    stale = await post(client, f"{BASE}/{old['flow_id']}", {"estimated_ac_power": 1500, "minimum_soc": 85, "restart_soc": 90})
+    stale = await post(client, f"{BASE}/{old['flow_id']}", grouped_input(entry, estimated_ac_power=1500))
     assert stale["type"] == "abort" and stale["reason"] == "configuration_changed"
     assert entry.runtime_data.settings["estimated_ac_power"] == 1200
     cancelled = await start(client, entry, "comfort")

@@ -70,9 +70,24 @@ const TEXT = {
 
 export const fieldDefault = (field) => field.description?.suggested_value ?? field.default;
 export const fieldKind = (field) => Object.keys(field.selector || {})[0] || field.type;
+export function formDefaults(fields) {
+  const result = {};
+  for (const field of fields) {
+    if (Array.isArray(field.schema)) result[field.name] = formDefaults(field.schema);
+    else {
+      const value = fieldDefault(field);
+      if (value !== undefined && value !== null) result[field.name] = value;
+    }
+  }
+  return result;
+}
 export function readForm(fields, form) {
   const result = {};
   for (const field of fields) {
+    if (Array.isArray(field.schema)) {
+      result[field.name] = readForm(field.schema, form);
+      continue;
+    }
     const input = form.elements.namedItem(field.name);
     if (!input) throw new Error("unsupported_field");
     const kind = fieldKind(field);
@@ -279,7 +294,7 @@ export class SolarClimatePanel extends HTMLElement {
     actions.append(mode);
     const history=this.button(this.t("history"),()=>this.showHistory(device));
     history.disabled=!device.loaded; actions.append(history);
-    for (const [key,step] of [["comfort","comfort"],["energy","energy"],["settings","init"]]) {
+    for (const [key,step] of [["settings","init"],["reconfigure","reconfigure"]]) {
       const button=this.button(this.t(key),()=>this.startFlow(device,step));button.disabled=!device.loaded;actions.append(button);
     }
     if (device.group_id) {
@@ -361,8 +376,14 @@ export class SolarClimatePanel extends HTMLElement {
     try {
       const payload=this._flowSection==="options"?{handler:device.entry_id}:{handler:"solar_climate_manager",...(device?{entry_id:device.entry_id}:{})};
       this._flow=await this._hass.callApi("POST",this._flowBase,payload);
+      if (this._flowSection==="options" && this._flow.step_id==="init" &&
+          (step.startsWith("group_") || step==="learning_reset")) {
+        const input={...formDefaults(this._flow.data_schema || []),
+          settings_action:step.startsWith("group_")?"group":step};
+        this._flow=await this._hass.callApi("POST",`${this._flowBase}/${this._flow.flow_id}`,input);
+      }
       if (this._flow.type==="menu" && step!=="init") {
-        const path=step.startsWith("group_")?["group",step]:[step];
+        const path=step.startsWith("group_") && this._flow.step_id!=="group"?["group",step]:[step];
         for (const next of path) {
           if (this._flow.type!=="menu") break;
           this._flow=await this._hass.callApi("POST",`${this._flowBase}/${this._flow.flow_id}`,{next_step_id:next});
@@ -415,6 +436,21 @@ export class SolarClimatePanel extends HTMLElement {
     body.append(form);
   }
   renderField(field,labels,errors) {
+    if (Array.isArray(field.schema)) {
+      const group=el("details");
+      group.open=!field.collapsed;
+      const sectionLabels=labels.sections?.[field.name] || {};
+      group.append(el("summary",sectionLabels.name || field.name));
+      const content=el("div");content.style.cssText="display:grid;gap:16px;padding:16px 0";
+      if(sectionLabels.description)content.append(el("p",sectionLabels.description,"subtle"));
+      for(const child of field.schema) {
+        const rendered=this.renderField(child,sectionLabels,errors);
+        if(!rendered)return null;
+        content.append(rendered);
+      }
+      group.append(content);
+      return group;
+    }
     const kind=fieldKind(field); const selector=field.selector?.[kind] || {};
     if (!["number","text","string","boolean","select","entity"].includes(kind)) return null;
     const label=el("label",null,kind==="boolean"?"check":"");

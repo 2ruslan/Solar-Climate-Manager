@@ -1,5 +1,6 @@
 """Shared schemas and validation for device and group forms."""
 
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
 from .climate_control import normalized_target
@@ -18,11 +19,70 @@ MAIN_NUMBERS = {
     **NUMERIC_SETTINGS,
 }
 SOURCE_KEYS = (set(OPTIONAL_SOURCES) - {"schedule_entity"}) | SOURCE_FLAGS
+SETTINGS_SECTIONS = {
+    "comfort": (
+        "temperature_entity", "hvac_mode", "target_temperature", "hysteresis",
+        "ac_min_temperature", "ac_max_temperature", "schedule_entity",
+    ),
+    "grid": (
+        "grid_available_entity", "grid_on_means_available",
+        "grid_power_entity", "grid_positive", "grid_import_limit_entity",
+        "grid_absence_minutes",
+    ),
+    "battery": (
+        "soc_entity", "minimum_soc", "restart_soc",
+        "battery_power_entity", "battery_positive",
+    ),
+    "solar": (
+        "pv_power_entity", "forecast_power_now_entity",
+        "forecast_power_30m_entity", "forecast_power_60m_entity",
+    ),
+    "consumption": (
+        "load_power_entity", "load_includes_ac", "load_includes_battery_charging",
+        "ac_power_entity", "power_accounting", "estimated_ac_power",
+        "power_margin_percent", "power_settle_seconds", "power_learning_enabled",
+    ),
+}
+
+
+def grouped_settings_schema(values, keys, suggest):
+    """Present existing flat settings in ordered sections without changing storage."""
+    fields = {}
+    for name, ordered in SETTINGS_SECTIONS.items():
+        selected = [key for key in ordered if key in keys]
+        if not selected:
+            continue
+        schema = settings_schema(values, selected)
+        by_key = {marker.schema: (marker, field) for marker, field in schema.schema.items()}
+        schema = vol.Schema(dict(by_key[key] for key in selected))
+        schema = suggest(
+            schema, {key: values[key] for key in selected if values.get(key) is not None}
+        )
+        fields[vol.Required(name)] = section(schema, {"collapsed": False})
+    return vol.Schema(fields)
+
+
+def flatten_settings_sections(user_input, keys):
+    """Only accept fields exposed by this device's sections."""
+    return {
+        key: value
+        for name, ordered in SETTINGS_SECTIONS.items()
+        for key, value in user_input.get(name, {}).items()
+        if key in keys and key in ordered
+    }
 
 
 def settings_schema(values, keys):
     fields = {}
-    for key in sorted(keys):
+    ordered_keys = sorted(keys)
+    for source, interpretation in (
+        ("grid_available_entity", "grid_on_means_available"),
+        ("grid_power_entity", "grid_positive"),
+    ):
+        if source in keys and interpretation in keys:
+            ordered_keys.remove(interpretation)
+            ordered_keys.insert(ordered_keys.index(source) + 1, interpretation)
+    for key in ordered_keys:
         if key in MAIN_NUMBERS:
             minimum, maximum, step, unit = MAIN_NUMBERS[key]
             fields[vol.Required(key, default=values[key])] = selector.NumberSelector(

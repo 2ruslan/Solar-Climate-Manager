@@ -35,7 +35,9 @@ window.hass={language:'uk',user:{is_admin:true},connection:{},states:{
   calls.push([method,path,data]);
   if(method==='DELETE')return {};
   if(window.failWrite)throw Error('offline');
-  if(path.endsWith('/flow')){current='init';return menu(current);}
+  if(path.endsWith('/flow')){current='init';return structuredClone(data.handler==='independent'?fixture.forms.independent:fixture.forms.energy);}
+  if(data.settings_action==='group'){current='group';return menu(current);}
+  if(data.settings_action==='learning_reset'){current='learning_reset';return structuredClone(fixture.forms[current]);}
   if(data.next_step_id){current=data.next_step_id;return current==='group'?menu(current):structuredClone(fixture.forms[current]);}
   if(current==='group_create')current='group_sources';
   else if(current==='group_sources')current='group_policy';
@@ -86,7 +88,7 @@ def main():
             page.goto(f"http://127.0.0.1:{server.server_port}")
             expect(page.get_by_role("heading", name="Будинок")).to_be_visible()
             page.screenshot(path="/tmp/scm-panel-desktop.png", full_page=True)
-            page.get_by_role("button", name="Облік потужності").first.click()
+            page.get_by_role("button", name="Налаштувати", exact=True).first.click()
             expect(page.locator('[name="estimated_ac_power"]')).to_have_value("900")
             page.locator('[name="estimated_ac_power"]').fill("1200")
             page.locator('[name="power_accounting"]').select_option("estimated")
@@ -95,10 +97,22 @@ def main():
             page.get_by_role("button", name="Зберегти", exact=True).click()
             expect(page.get_by_role("heading", name="Зміни збережено")).to_be_visible()
             saved = page.evaluate("calls.at(-1)[2]")
-            assert saved["estimated_ac_power"] == 1200
-            assert saved["power_accounting"] == "estimated"
-            assert saved["power_learning_enabled"] is True
-            assert "ac_power_entity" not in saved
+            assert saved["consumption"]["estimated_ac_power"] == 1200
+            assert saved["consumption"]["power_accounting"] == "estimated"
+            assert saved["consumption"]["power_learning_enabled"] is True
+            assert "ac_power_entity" not in saved["consumption"]
+            assert "temperature_entity" in saved["comfort"]
+            page.get_by_role("button", name="Готово", exact=True).click()
+            page.get_by_role("button", name="Налаштувати", exact=True).last.click()
+            for title in ("Клімат і розклад", "Мережа", "Батарея", "Сонячна генерація", "Споживання"):
+                expect(page.locator("summary").filter(has_text=title)).to_be_visible()
+            page.locator('[name="grid_on_means_available"]').uncheck()
+            page.locator('[name="grid_positive"]').select_option("export")
+            page.get_by_role("button", name="Зберегти", exact=True).click()
+            saved = page.evaluate("calls.at(-1)[2]")
+            assert saved["grid"]["grid_on_means_available"] is False
+            assert saved["grid"]["grid_positive"] == "export"
+            assert set(saved) == {"comfort", "grid", "battery", "solar", "consumption", "settings_action"}
             page.get_by_role("button", name="Готово", exact=True).click()
             expect(page.get_by_text("Навчена оцінка · Узгоджені спостереження", exact=False)).to_be_visible()
             page.get_by_role("button", name="Скинути навчання", exact=True).first.click()
@@ -122,7 +136,7 @@ def main():
             page.get_by_role("button", name="Скасувати", exact=True).click()
             page.locator("select.mode").first.select_option("disabled")
             assert page.evaluate("calls.at(-1)[0]") == "service"
-            page.get_by_role("button", name="Облік потужності").first.click()
+            page.get_by_role("button", name="Налаштувати", exact=True).first.click()
             page.evaluate("window.failWrite=true")
             page.get_by_role("button", name="Зберегти", exact=True).click()
             expect(page.get_by_text("Не вдалося перевірити результат збереження.", exact=False)).to_be_visible()

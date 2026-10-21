@@ -15,6 +15,10 @@ class Marker(str):
     def __new__(cls, value, **kwargs):
         return super().__new__(cls, value)
 
+    @property
+    def schema(self):
+        return str(self)
+
 
 class Schema:
     def __init__(self, fields):
@@ -39,6 +43,7 @@ class Flow:
 
 
 module("homeassistant.config_entries", ConfigFlow=Flow, OptionsFlowWithReload=Flow)
+module("homeassistant.data_entry_flow", section=lambda schema, options: schema)
 selector = types.ModuleType("homeassistant.helpers.selector")
 selector.NumberSelectorMode = SimpleNamespace(BOX="box")
 for name in ["NumberSelector", "SelectSelector", "EntitySelector", "BooleanSelector"]:
@@ -131,9 +136,13 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         result = await self.flow.async_step_group_sources(form["values"])
         self.assertEqual(result["errors"]["base"], "incomplete_sources")
 
-    async def test_menu_and_separate_advanced_form(self):
+    async def test_grouped_form_and_legacy_steps(self):
         result = await self.flow.async_step_init()
-        self.assertEqual(result["menu_options"], ["sources", "comfort", "energy", "advanced", "group"])
+        self.assertEqual(list(result["data_schema"].schema),
+                         ["comfort", "grid", "battery", "solar", "consumption", "settings_action"])
+        grid = list(result["data_schema"].schema["grid"].schema)
+        self.assertEqual(grid.index("grid_on_means_available"), grid.index("grid_available_entity") + 1)
+        self.assertEqual(grid.index("grid_positive"), grid.index("grid_power_entity") + 1)
         advanced = await self.flow.async_step_advanced()
         self.assertEqual(set(advanced["data_schema"].schema), {"grid_absence_minutes"})
         energy = await self.flow.async_step_energy()
@@ -158,6 +167,35 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"]["minimum_soc"], 90)
         self.assertEqual(result["data"]["restart_soc"], 95)
         self.assertEqual(result["data"]["pv_power_entity"], "sensor.pv")
+
+    async def test_grouped_save_flattens_sections_and_clears_optional_sources(self):
+        await self.flow.async_step_init()
+        values = self.flow.values()
+        helpers = importlib.import_module("scm_adapter_test.flow_helpers")
+        submitted = {
+            name: {key: values[key] for key in ordered if key in values}
+            for name, ordered in helpers.SETTINGS_SECTIONS.items()
+        }
+        submitted["solar"].pop("pv_power_entity")
+        submitted["comfort"]["target_temperature"] = 24
+        submitted["grid"]["grid_on_means_available"] = False
+        result = await self.flow.async_step_init(submitted)
+        self.assertEqual(result["type"], "create_entry")
+        self.assertIsNone(result["data"]["pv_power_entity"])
+        self.assertEqual(result["data"]["target_temperature"], 24)
+        self.assertFalse(result["data"]["grid_on_means_available"])
+        self.assertNotIn("comfort", result["data"])
+        self.assertNotIn("settings_action", result["data"])
+
+    async def test_group_navigation_does_not_save_form_edits(self):
+        await self.flow.async_step_init()
+        original = dict(self.entry.options)
+        self.flow.async_step_group = AsyncMock(return_value={"type": "menu"})
+        result = await self.flow.async_step_init({
+            "settings_action": "group", "comfort": {"target_temperature": 30},
+        })
+        self.assertEqual(result["type"], "menu")
+        self.assertEqual(self.entry.options, original)
 
     async def test_conditional_limits_only_when_enabled(self):
         form = await self.flow.async_step_energy()

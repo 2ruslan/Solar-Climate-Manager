@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from homeassistant.config_entries import SOURCE_RECONFIGURE
 from homeassistant.helpers import entity_registry as er
-from test_integration import enable_group_control, setup, setup_shadow_group
+from test_integration import enable_group_control, grouped_input, setup, setup_shadow_group
 
 from custom_components.solar_climate_manager.adapters.groups import get_group_repository
 from custom_components.solar_climate_manager.const import DOMAIN
@@ -16,9 +16,12 @@ from custom_components.solar_climate_manager.group_flow import GROUP_FLAGS, POLI
 
 async def options(hass, entry, step):
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    return await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": step}
-    )
+    if step in ("group", "learning_reset"):
+        return await hass.config_entries.options.async_configure(
+            result["flow_id"], {**grouped_input(entry), "settings_action": step}
+        )
+    result["_test_entry"] = entry
+    return result
 
 
 async def group_form(hass, entry, step):
@@ -30,6 +33,8 @@ async def group_form(hass, entry, step):
 
 
 async def submit(hass, form, values):
+    if form["step_id"] == "init":
+        values = grouped_input(form["_test_entry"], **values)
     return await hass.config_entries.options.async_configure(form["flow_id"], values)
 
 
@@ -175,12 +180,12 @@ async def test_group_join_does_not_switch_active_control_implicitly(hass):
 async def test_group_member_local_forms_do_not_edit_shared_policy(hass):
     first, _, repository, group_id = await setup_shadow_group(hass)
     form = await options(hass, first, "sources")
-    assert {str(k) for k in form["data_schema"].schema} == {"ac_power_entity"}
+    assert {str(k) for k in form["data_schema"].schema} == {
+        "comfort", "consumption", "settings_action",
+    }
     form = await options(hass, first, "energy")
     assert {str(k) for k in form["data_schema"].schema} == {
-        "estimated_ac_power", "power_accounting", "power_margin_percent",
-        "power_settle_seconds", "ac_power_entity",
-        "power_learning_enabled",
+        "comfort", "consumption", "settings_action",
     }
     before = repository.registry.group(group_id)
     result = await submit(hass, form, {"estimated_ac_power": 1200})

@@ -1,4 +1,4 @@
-"""Short section-based configuration; hidden settings survive section edits."""
+"""Grouped configuration; hidden settings survive edits."""
 
 from dataclasses import asdict
 from uuid import uuid4
@@ -6,11 +6,19 @@ from uuid import uuid4
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import selector
 
 from .adapters.groups import get_group_repository
 from .adapters.migrations import CONFIG_VERSION
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
-from .flow_helpers import SOURCE_KEYS, settings_schema, validate, vol
+from .flow_helpers import (
+    SOURCE_KEYS,
+    flatten_settings_sections,
+    grouped_settings_schema,
+    settings_schema,
+    validate,
+    vol,
+)
 from .group_flow import GroupOptionsMixin, ensure_editable, flow_error
 from .settings import (
     ACCOUNTING_KEYS,
@@ -119,12 +127,20 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
         )
 
     async def async_step_init(self, user_input=None):
-        choices = ["sources", "comfort", "energy"]
-        if self.cached_membership() is None:
-            choices.append("advanced")
-        if self.cached_membership() is not None:
-            choices.append("learning_reset")
-        return self.async_show_menu(step_id="init", menu_options=[*choices, "group"])
+        member = self.cached_membership()
+        keys = (
+            COMFORT_KEYS | ACCOUNTING_KEYS
+            if member
+            else COMFORT_KEYS | SOURCE_KEYS | ENERGY_KEYS | ADVANCED_KEYS
+        )
+        if user_input is not None:
+            action = user_input.get("settings_action", "save")
+            if action == "group":
+                return await self.async_step_group()
+            if action == "learning_reset" and member:
+                return await self.async_step_learning_reset()
+            user_input = flatten_settings_sections(user_input, keys)
+        return await self.section("init", keys, user_input)
 
     async def async_step_learning_reset(self, user_input=None):
         current = (dict(self.config_entry.data), dict(self.config_entry.options), self.cached_membership())
@@ -147,6 +163,20 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
         self._section_original = (
             dict(self.config_entry.data), dict(self.config_entry.options), self.cached_membership()
         )
+        if step == "init":
+            schema = grouped_settings_schema(values, keys, self.add_suggested_values_to_schema)
+            fields = dict(schema.schema)
+            actions = ["save", "group"]
+            if self.cached_membership() is not None:
+                actions.append("learning_reset")
+            fields[vol.Required("settings_action", default="save")] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=actions, translation_key="settings_action",
+                )
+            )
+            return self.async_show_form(
+                step_id=step, data_schema=vol.Schema(fields), errors=errors or {},
+            )
         schema = settings_schema(values, keys)
         suggested = {
             key: value for key, value in values.items() if key in keys and value is not None

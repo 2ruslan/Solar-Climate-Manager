@@ -10,6 +10,28 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.solar_climate_manager.const import DEFAULTS, DOMAIN
+from custom_components.solar_climate_manager.flow_helpers import SETTINGS_SECTIONS, SOURCE_KEYS
+from custom_components.solar_climate_manager.settings import (
+    ACCOUNTING_KEYS,
+    ADVANCED_KEYS,
+    COMFORT_KEYS,
+    ENERGY_KEYS,
+)
+
+
+def grouped_input(entry, **updates):
+    values = {**DEFAULTS, **entry.data, **entry.options, **updates}
+    member = entry.runtime_data.group_manager.repository.registry.membership(
+        entry.runtime_data.device_id
+    )
+    names = ("comfort", "consumption") if member else SETTINGS_SECTIONS
+    keys = (COMFORT_KEYS | ACCOUNTING_KEYS if member
+            else COMFORT_KEYS | SOURCE_KEYS | ENERGY_KEYS | ADVANCED_KEYS)
+    return {
+        name: {key: values[key] for key in SETTINGS_SECTIONS[name]
+               if key in keys and values.get(key) is not None}
+        for name in names
+    }
 
 
 def inputs():
@@ -99,18 +121,10 @@ async def test_reload_restores_hysteresis_and_options_reset(hass):
     await hass.async_block_till_done()
     assert entry.runtime_data.data["demand"]
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] == "menu"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "comfort"}
-    )
+    assert result["type"] == "form"
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {
-            "target_temperature": 20,
-            "temperature_entity": "sensor.room",
-            "hysteresis": 1,
-            "hvac_mode": "heat",
-        },
+        grouped_input(entry, target_temperature=20, hysteresis=1),
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
@@ -153,17 +167,8 @@ async def test_solar_sources_independent_of_temperature(hass):
     assert entry.runtime_data.data["demand"]
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "sources"}
-    )
-    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {
-            "load_includes_ac": True,
-            "load_includes_battery_charging": False,
-            "grid_on_means_available": True,
-            "battery_positive": "discharge",
-            "grid_positive": "import",
-        },
+        grouped_input(entry, pv_power_entity=None),
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
@@ -739,11 +744,21 @@ async def test_group_control_releases_reserve_only_after_coherent_meter_reports(
         assert repository.registry.unresolved[0].command_id != token
 
 
-async def test_group_control_slow_start_does_not_block_other_protective_stop(hass):
+def settle_group_measurements(hass, freezer):
+    """Provide fresh aggregate readings after an estimated member has settled."""
+    freezer.tick(timedelta(seconds=121))
+    for entity_id in ("sensor.pv", "sensor.load", "sensor.soc", "sensor.battery",
+                      "binary_sensor.grid"):
+        state = hass.states.get(entity_id)
+        hass.states.async_set(entity_id, state.state, dict(state.attributes), force_update=True)
+
+
+async def test_group_control_slow_start_does_not_block_other_protective_stop(hass, freezer):
     first, second, repository, _ = await setup_shadow_group(hass)
     hass.states.async_set("climate.second", "heat", {
         "hvac_modes": ["off", "heat", "cool"], "current_temperature": 21, "temperature": 25})
     await hass.async_block_till_done()
+    settle_group_measurements(hass, freezer)
     hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
     hass.states.async_set("sensor.load", "1500", {"unit_of_measurement": "W"})
     started, stopped, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -810,7 +825,7 @@ async def test_group_control_storage_failure_does_not_block_protective_stop(hass
         assert repository.registry.unresolved  # Off without durable proof does not release power.
 
 
-async def test_group_control_three_members_prioritize_and_account_for_manual_member(hass):
+async def test_group_control_three_members_prioritize_and_account_for_manual_member(hass, freezer):
     from dataclasses import replace
 
     first, second, repository, group_id = await setup_shadow_group(hass)
@@ -825,6 +840,7 @@ async def test_group_control_three_members_prioritize_and_account_for_manual_mem
     high = second.runtime_data.device_id
     await repository.async_update(lambda state: replace(state, memberships=tuple(
         replace(m, priority=100) if m.device_id == high else m for m in state.memberships)))
+    settle_group_measurements(hass, freezer)
     hass.states.async_set("sensor.pv", "5000", {"unit_of_measurement": "W"})
     hass.states.async_set("sensor.load", "1500", {"unit_of_measurement": "W"})
     with patch.object(type(hass.services), "async_call") as calls:

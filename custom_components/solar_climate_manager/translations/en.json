@@ -59,22 +59,76 @@
     "step": {
       "init": {
         "title": "Settings",
-        "menu_options": {
-          "sources": "Data sources",
-          "comfort": "Comfort",
-          "energy": "Energy",
-          "advanced": "Advanced",
-          "group": "Energy group",
-          "learning_reset": "Reset power learning"
+        "description": "Saving applies all changes in this form. Group members have individual climate and consumption settings here; shared sources and policies are edited through group management. Opening group management or resetting power learning does not save changes in this form.",
+        "data": {
+          "settings_action": "Action"
+        },
+        "sections": {
+          "comfort": {
+            "name": "Climate and schedule",
+            "data": {
+              "temperature_entity": "Room temperature sensor",
+              "hvac_mode": "Thermostat mode",
+              "target_temperature": "Target temperature (°C)",
+              "hysteresis": "Hysteresis (±°C)",
+              "ac_min_temperature": "Minimum AC command temperature (°C)",
+              "ac_max_temperature": "Maximum AC command temperature (°C)",
+              "schedule_entity": "Allowed operation schedule"
+            }
+          },
+          "grid": {
+            "name": "Grid",
+            "data": {
+              "grid_available_entity": "Grid availability binary sensor",
+              "grid_on_means_available": "Grid binary sensor ON means available",
+              "grid_power_entity": "Signed grid import/export power sensor",
+              "grid_positive": "Positive grid power means",
+              "grid_import_limit_entity": "Inverter grid import limit (number, optional; 0 = unlimited)",
+              "grid_absence_minutes": "Grid absence duration (minutes)"
+            }
+          },
+          "battery": {
+            "name": "Battery",
+            "data": {
+              "soc_entity": "Battery SOC sensor (%)",
+              "minimum_soc": "Charge level for stopping (%)",
+              "restart_soc": "Charge level for resuming operation (%)",
+              "battery_power_entity": "Signed battery power sensor",
+              "battery_positive": "Positive battery power means"
+            }
+          },
+          "solar": {
+            "name": "Solar generation",
+            "data": {
+              "pv_power_entity": "Actual PV power sensor",
+              "forecast_power_now_entity": "Forecast solar power now sensor",
+              "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
+              "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor"
+            }
+          },
+          "consumption": {
+            "name": "Consumption",
+            "data": {
+              "load_power_entity": "Total consumption power sensor",
+              "load_includes_ac": "House load includes the real AC",
+              "load_includes_battery_charging": "Total consumption includes battery charging",
+              "ac_power_entity": "AC power sensor",
+              "power_accounting": "Group power accounting",
+              "estimated_ac_power": "Conservative estimated AC power (W)",
+              "power_margin_percent": "Estimated power margin (%)",
+              "power_settle_seconds": "Stabilization after confirmation (s)",
+              "power_learning_enabled": "Learn from aggregate consumption"
+            }
+          }
         }
       },
       "sources": {
         "title": "Data sources",
         "data": {
           "pv_power_entity": "Actual PV power sensor",
-          "forecast_power_now_entity": "Forecast power now sensor",
-          "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
-          "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
+          "forecast_power_now_entity": "Forecast solar power now sensor",
+          "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
+          "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
@@ -176,9 +230,9 @@
         "title": "Shared sources",
         "data": {
           "pv_power_entity": "Actual PV power sensor",
-          "forecast_power_now_entity": "Forecast power now sensor",
-          "forecast_power_30m_entity": "Forecast power in 30 minutes sensor",
-          "forecast_power_60m_entity": "Forecast power in 1 hour sensor",
+          "forecast_power_now_entity": "Forecast solar power now sensor",
+          "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
+          "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
@@ -295,6 +349,13 @@
         "collecting": "Collecting independent cycles",
         "inconsistent_cycle": "Inconsistent cycle — previous estimate retained"
       }
+    },
+    "settings_action": {
+      "options": {
+        "save": "Save settings",
+        "group": "Open energy group management",
+        "learning_reset": "Open power learning reset"
+      }
     }
   },
   "entity": {
@@ -324,13 +385,13 @@
         "name": "Actual PV power"
       },
       "forecast_power_now": {
-        "name": "Forecast power now"
+        "name": "Forecast solar power now"
       },
       "forecast_power_30m": {
-        "name": "Forecast power in 30 minutes"
+        "name": "Forecast solar power in 30 minutes"
       },
       "forecast_power_60m": {
-        "name": "Forecast power in 1 hour"
+        "name": "Forecast solar power in 1 hour"
       },
       "load_power": {
         "name": "Total consumption power"
