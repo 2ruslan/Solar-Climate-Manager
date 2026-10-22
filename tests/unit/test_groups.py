@@ -33,6 +33,22 @@ class GroupTests(unittest.TestCase):
             "Workshop", configured_sources(), groups.GroupPolicy(minimum_soc=70, restart_soc=80)
         )
 
+    def test_retired_grid_age_is_ignored_when_loading_saved_groups(self):
+        data = groups.serialize_registry(self.registry)
+        for group in data["groups"]:
+            group["policy"]["grid_max_data_age"] = 1
+            group["policy"]["max_battery_discharge"] = 1
+            group["sources"]["forecast_power_now_entity"] = "sensor.retired"
+            group["sources"]["forecast_power_30m_entity"] = "sensor.retired"
+            group["sources"]["forecast_power_60m_entity"] = "sensor.retired"
+            group["policy"]["start_delay"] = 99999
+            group["policy"]["shortage_delay"] = 99999
+        restored = groups.restore_registry(data)
+        self.assertEqual(restored, self.registry)
+        for group in groups.serialize_registry(restored)["groups"]:
+            self.assertNotIn("grid_max_data_age", group["policy"])
+            self.assertNotIn("max_battery_discharge", group["policy"])
+
     def test_legacy_reservation_is_restored_as_uncertain(self):
         data = groups.serialize_registry(self.registry.join("one", self.first))
         data["schema_version"] = 1
@@ -112,7 +128,7 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(state.readiness(self.first, frozenset({"one"})), "incomplete_sources")
         for kwargs in (
             {"minimum_soc": 90, "restart_soc": 85},
-            {"max_battery_discharge": float("nan")},
+            {"power_max_data_age": float("nan")},
             {"load_scope": "some_members"},
             {"grid_positive": "other"},
         ):

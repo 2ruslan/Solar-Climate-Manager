@@ -1,4 +1,4 @@
-"""Pure validation of actual and forecast power; never infer available surplus."""
+"""Pure validation of measured power; never infer available surplus."""
 
 from datetime import datetime
 from math import isfinite
@@ -7,7 +7,7 @@ from .model import is_fresh
 
 
 def power_watts(value, unit):
-    """Power only: energy in Wh/kWh cannot be substituted for a power forecast."""
+    """Power only: energy in Wh/kWh cannot be substituted for a power measurement."""
     if isinstance(value, bool):
         return None
     try:

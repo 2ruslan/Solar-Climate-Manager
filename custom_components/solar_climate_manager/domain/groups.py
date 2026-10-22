@@ -14,9 +14,6 @@ SHARED_SOURCE_KEYS = (
     "grid_power_entity",
     "grid_import_limit_entity",
     "grid_available_entity",
-    "forecast_power_now_entity",
-    "forecast_power_30m_entity",
-    "forecast_power_60m_entity",
 )
 
 
@@ -35,9 +32,6 @@ class GroupSources:
     grid_power_entity: str | None = None
     grid_import_limit_entity: str | None = None
     grid_available_entity: str | None = None
-    forecast_power_now_entity: str | None = None
-    forecast_power_30m_entity: str | None = None
-    forecast_power_60m_entity: str | None = None
 
     def __post_init__(self) -> None:
         for name, value in asdict(self).items():
@@ -73,12 +67,8 @@ class GroupSources:
 class GroupPolicy:
     minimum_soc: float = 85
     restart_soc: float = 90
-    max_battery_discharge: float = 100
-    start_delay: float = 600
-    shortage_delay: float = 600
     grid_absence_delay: float = 600
     power_max_data_age: float = 900
-    grid_max_data_age: float = 86400
     load_includes_battery_charging: bool = False
     grid_on_means_available: bool = True
     battery_positive: Literal["charge", "discharge"] = "discharge"
@@ -90,12 +80,8 @@ class GroupPolicy:
         for name in (
             "minimum_soc",
             "restart_soc",
-            "max_battery_discharge",
-            "start_delay",
-            "shortage_delay",
             "grid_absence_delay",
             "power_max_data_age",
-            "grid_max_data_age",
         ):
             value = getattr(self, name)
             if (
@@ -363,8 +349,15 @@ def restore_registry(data: Any) -> GroupRegistry:
                 GroupConfig(
                     group_id=g["group_id"],
                     name=g["name"],
-                    sources=GroupSources(**g["sources"]),
-                    policy=GroupPolicy(**g["policy"]),
+                    sources=GroupSources(**{
+                        key: value for key, value in g["sources"].items()
+                        if key not in {"forecast_power_now_entity", "forecast_power_30m_entity", "forecast_power_60m_entity"}
+                    }),
+                    # Ignore retired limits when loading existing groups.
+                    policy=GroupPolicy(**{
+                        key: value for key, value in g["policy"].items()
+                        if key not in {"grid_max_data_age", "max_battery_discharge", "start_delay", "shortage_delay"}
+                    }),
                 )
                 for g in data["groups"]
             ),

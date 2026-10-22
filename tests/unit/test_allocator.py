@@ -13,7 +13,7 @@ models = importlib.import_module("scm_adapter_test.domain.types")
 
 class AllocatorTests(unittest.TestCase):
     def setUp(self):
-        self.policy = groups.GroupPolicy(start_delay=0, shortage_delay=60, grid_absence_delay=120)
+        self.policy = groups.GroupPolicy(grid_absence_delay=120)
         self.requests = (a.DeviceRequest("a"), a.DeviceRequest("b"))
         self.energy = models.EnergySnapshot(pv=1600, load=600, soc=95, battery=0, grid=False)
         self.snapshot = a.GroupSnapshot("group", 1000, self.energy, self.requests, 1000)
@@ -109,13 +109,20 @@ class AllocatorTests(unittest.TestCase):
         for changes, reason in (
             ({"grid_power": 2001}, "grid_import_limit"),
             ({"grid": False}, "low_soc"),
-            ({"grid_import_limit": 0}, "battery_discharge"),
         ):
             with self.subTest(reason=reason):
                 stopped = self.run_allocation(
                     requests=(running,), energy=replace(energy, **changes),
                 )
                 self.assertEqual(self.actions(stopped)["a"], ("stop", reason))
+
+    def test_low_soc_discharge_does_not_block_unlimited_grid(self):
+        energy = replace(self.energy, grid=True, soc=70, battery=5000)
+        for configured in (False, True):
+            result = self.run_allocation(energy=replace(
+                energy, grid_limit_configured=configured, grid_import_limit=0,
+            ))
+            self.assertEqual(self.actions(result)["a"][0], "start")
 
     def test_priority_is_deterministic_and_request_order_independent(self):
         result = self.run_allocation(requests=(self.requests[1], self.requests[0]))
@@ -367,19 +374,21 @@ class AllocatorTests(unittest.TestCase):
         ready = a.allocate(self.snapshot, recovery.state, self.policy)
         self.assertFalse(ready.state.soc_blocked)
 
-    def test_start_confirmation_and_minimum_off(self):
-        policy = replace(self.policy, start_delay=60)
-        first = a.allocate(self.snapshot, self.state, policy)
-        self.assertEqual(first.decisions[0].reason, "start_confirmation")
-        ready = a.allocate(replace(self.snapshot, now=1060), first.state, policy)
-        self.assertEqual(ready.decisions[0].action, "start")
+    def test_first_deficit_sheds_without_waiting_for_deficit_duration(self):
+        running = replace(self.requests[0], running=True, measured_watts=900, last_start=0)
+        result = self.run_allocation(
+            requests=(running,), energy=replace(self.energy, pv=100, load=1500),
+        )
+        self.assertEqual(self.actions(result)["a"], ("stop", "outage_deficit"))
+
+    def test_solar_starts_immediately_but_respects_minimum_off(self):
+        first = a.allocate(self.snapshot, self.state, self.policy)
+        self.assertEqual(first.decisions[0].action, "start")
         paused = self.run_allocation(requests=(replace(self.requests[0], last_stop=999),))
         self.assertEqual(paused.decisions[0].reason, "minimum_off")
-        broken = a.allocate(
-            replace(self.snapshot, energy=replace(self.energy, pv=0)), first.state, policy
-        )
-        restarted = a.allocate(replace(self.snapshot, now=1060), broken.state, policy)
-        self.assertEqual(restarted.decisions[0].reason, "start_confirmation")
+        deficit = self.run_allocation(energy=replace(self.energy, pv=0))
+        recovered = a.allocate(self.snapshot, deficit.state, self.policy)
+        self.assertEqual(recovered.decisions[0].action, "start")
 
     def test_modes_shadow_grants_cannot_dispatch_or_enter_real_budget(self):
         requests = tuple(
@@ -516,11 +525,11 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual(self.actions(result)["b"][0], "wait")
         self.assertEqual(result.available_watts, 100)
 
-    def test_start_confirmation_and_off_timer_run_concurrently(self):
+    def test_only_minimum_off_timer_delays_solar_start(self):
         request = replace(self.requests[0], last_stop=700)
         snapshot = replace(self.snapshot, requests=(request,))
-        policy = replace(self.policy, start_delay=600)
+        policy = self.policy
         first = a.allocate(snapshot, self.state, policy)
-        self.assertEqual(first.decisions[0].reason, "start_confirmation")
+        self.assertEqual(first.decisions[0].reason, "minimum_off")
         ready = a.allocate(replace(snapshot, now=1600, load_reported_at=1600), first.state, policy)
         self.assertEqual(ready.decisions[0].action, "start")

@@ -90,7 +90,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values["grid_positive"], "export")
         self.assertFalse(values["grid_on_means_available"])
         self.assertTrue(values["load_includes_battery_charging"])
-        self.assertIsNone(values["forecast_power_now_entity"])
+        self.assertNotIn("forecast_power_now_entity", values)
         self.assertEqual(values["load_scope"], "excludes_all_members")
         self.assertNotIn("estimated_ac_power", values)
         self.assertNotIn("temperature_entity", values)
@@ -105,11 +105,10 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         values = dict(form["values"])
         self.assertEqual(values["load_scope"], "includes_all_members")
         values.pop("soc_entity")
-        values.pop("forecast_power_now_entity")
         form = await self.flow.async_step_group_sources(values)
         self.assertEqual(form["errors"]["base"], "incomplete_sources")
         self.assertIsNone(form["values"]["soc_entity"])
-        self.assertIsNone(form["values"]["forecast_power_now_entity"])
+        self.assertNotIn("forecast_power_now_entity", form["values"])
         values = {**form["values"], "soc_entity": "sensor.soc", "load_scope": "excludes_all_members"}
         form = await self.flow.async_step_group_sources(values)
         self.assertEqual(form["step_id"], "group_policy")
@@ -123,7 +122,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         policy = {**form["values"], "minimum_soc": 72, "restart_soc": 84}
         self.assertEqual((await self.flow.async_step_group_policy(policy))["type"], "create_entry")
         group = result[0].groups[0]
-        self.assertIsNone(group.sources.forecast_power_now_entity)
+        self.assertFalse(hasattr(group.sources, "forecast_power_now_entity"))
         self.assertEqual(group.policy.load_scope, "excludes_all_members")
         self.assertEqual(group.policy.minimum_soc, 72)
         self.assertEqual(group.policy.restart_soc, 84)

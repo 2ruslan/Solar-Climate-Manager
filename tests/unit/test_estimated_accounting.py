@@ -12,7 +12,7 @@ view = importlib.import_module("scm_adapter_test.group_presentation")
 class EstimatedAccountingTests(unittest.TestCase):
     def setUp(self):
         self.member = groups.MemberPolicy(power_accounting="estimated", power_settle_seconds=30)
-        self.policy = groups.GroupPolicy(start_delay=0)
+        self.policy = groups.GroupPolicy()
         self.request = a.DeviceRequest("a", self.member, running=True,
                                        state_reported_at=1001, state_observed_at=1001,
                                        command_confirmed_at=1001, last_start=1001)
@@ -148,8 +148,7 @@ class EstimatedAccountingTests(unittest.TestCase):
         reserve = replace(self.reserve, watts=1000, phase="uncertain", stop_sent_at=1005)
         state = replace(self.state, reservations=(reserve,))
         energy = replace(self.snapshot.energy, grid=True, soc=81, pv=1810, load=687,
-                         grid_limit_configured=True, grid_import_limit=2000, grid_power=86,
-                         forecasts=(2149, 2453, 2660))
+                         grid_limit_configured=True, grid_import_limit=2000, grid_power=86)
         snapshot = replace(self.snapshot, requests=(request,), energy=energy,
                            grid_reported_at=1040)
         result = a.allocate(snapshot, state, self.policy, shadow=False)
@@ -171,27 +170,17 @@ class EstimatedAccountingTests(unittest.TestCase):
         result = a.allocate(replace(self.snapshot, requests=(request,)), self.state, self.policy)
         self.assertEqual(result.reason, "incomplete_members")
 
-    def test_forecast_guides_starts_without_overriding_current_capacity(self):
+    def test_starts_use_only_current_capacity(self):
         request = replace(self.request, running=False)
         for grid in (False, True):
             energy = replace(self.snapshot.energy, grid=grid, pv=3000, load=800,
                              grid_limit_configured=True, grid_import_limit=3000, grid_power=800)
             snapshot = replace(self.snapshot, requests=(request,), energy=energy,
                                grid_reported_at=1040)
-            for forecasts, expected in (
-                ((3000, 3200, 3500), "start"),
-                ((3000, 2500, 1500), "wait"),
-                ((None, None, None), "start"),
-                ((3000, float("nan"), 3500), "start"),
-            ):
-                with self.subTest(grid=grid, forecasts=forecasts):
-                    result = a.allocate(replace(snapshot, energy=replace(energy, forecasts=forecasts)),
-                                        a.AllocationState("g"), self.policy, shadow=False)
-                    self.assertEqual(result.decisions[0].action, expected)
-                    if expected == "wait":
-                        self.assertEqual(result.decisions[0].reason, "forecast_deficit")
-            # A good forecast cannot fund a start which exceeds present headroom.
+            result = a.allocate(snapshot, a.AllocationState("g"), self.policy, shadow=False)
+            self.assertEqual(result.decisions[0].action, "start")
+            # Insufficient current headroom blocks a start.
             result = a.allocate(replace(snapshot, energy=replace(
-                energy, pv=1000, grid_power=2800, forecasts=(5000, 5000, 5000))),
+                energy, pv=1000, grid_power=2800)),
                 a.AllocationState("g"), self.policy, shadow=False)
             self.assertEqual(result.decisions[0].reason, "insufficient_budget")

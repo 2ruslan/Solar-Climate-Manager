@@ -115,7 +115,7 @@ async def test_group_wizard_is_atomic_and_preserves_modes_and_identity(hass):
         form = await submit(hass, form, group_sources())
         assert form["step_id"] == "group_policy"
         assert repository.registry.groups == ()
-        result = await submit(hass, form, policy(start_delay=0))
+        result = await submit(hass, form, policy())
         assert result["type"] == "create_entry"
         await hass.async_block_till_done()
         calls.assert_not_called()

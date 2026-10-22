@@ -445,16 +445,6 @@ def allocate(
     ):
         blocked = True
         reason, hard = "low_soc" if energy.soc < policy.minimum_soc else "soc_recovery", True
-    elif (
-        energy.grid
-        and blocked
-        # With an explicit import limit, the shared grid budget below decides
-        # which members can run regardless of the inverter's battery dispatch.
-        and not (energy.grid_limit_configured and energy.grid_import_limit != 0)
-        and energy.battery is not None
-        and energy.battery > policy.max_battery_discharge
-    ):
-        reason, hard = "battery_discharge", True
     elif not snapshot.complete or any(
         not r.available or r.running is None or r.watts is None for r in snapshot.requests
     ):
@@ -548,7 +538,6 @@ def allocate(
             decisions[request.device_id] = DeviceAllocation(request.device_id, "wait", reason)
     # Shed only the required prefix in ascending priority, never to promote a waiting device.
     grid_deficit = energy.grid is True and deficit > 0
-    sustained = deficit_since is not None and now - deficit_since >= policy.shortage_delay
     for request in sorted(candidates, key=lambda r: (r.priority, -(r.watts or 0), r.device_id)):
         if deficit <= 0:
             break
@@ -559,30 +548,15 @@ def allocate(
         outage_expired = (
             outage_since is not None and now - outage_since >= policy.grid_absence_delay
         )
-        if grid_deficit or sustained and (min_run_done or outage_expired):
+        if grid_deficit or min_run_done or outage_expired:
             decisions[request.device_id] = DeviceAllocation(
                 request.device_id, "stop", "grid_import_limit" if grid_deficit else "outage_deficit"
             )
             deficit = max(0.0, deficit - (request.watts or 0))
     # Stop proposals do not free measured power in this cycle.
     available = max(0.0, budget) if budget is not None else None
-    # Forecasts guide new starts, never confirm physical commands or invent
-    # present capacity. Account for a predicted PV drop over the whole horizon.
-    forecast_available = available
-    if (
-        available is not None
-        and _valid(energy.pv)
-        and energy.forecasts
-        and all(_valid(value) for value in energy.forecasts)
-        and (not energy.grid or energy.grid_limit_configured and energy.grid_import_limit != 0)
-    ):
-        assert energy.pv is not None
-        forecast_pv = min(value for value in energy.forecasts if value is not None)
-        forecast_available = max(0.0, available - max(0.0, energy.pv - forecast_pv))
     reservations = list(state.reservations)
     active = {r.device_id for r in reservations if r.phase != "accounted"}
-    confirmations = dict(state.confirmations)
-    next_confirmations = []
     new_reserved = 0.0
     for request in sorted(snapshot.requests, key=lambda r: (-r.priority, r.device_id)):
         if request.running or not controllable(request):
@@ -612,25 +586,16 @@ def allocate(
                 why = "telemetry_unsettled"
             elif incremental > available:
                 why = "insufficient_budget"
-            elif forecast_available is not None and incremental > forecast_available:
-                why = "forecast_deficit"
             else:
-                since = confirmations.get(request.device_id, now)
-                next_confirmations.append((request.device_id, since))
                 off_left = (
                     max(0, request.policy.minimum_off_time - (now - request.last_stop))
                     if request.last_stop is not None
                     else 0
                 )
-                confirmation_left = (
-                    max(0, policy.start_delay - (now - since)) if not energy.grid else 0
-                )
-                if off_left or confirmation_left:
-                    why = "minimum_off" if off_left >= confirmation_left else "start_confirmation"
+                if off_left:
+                    why = "minimum_off"
                 else:
                     available -= incremental
-                    if forecast_available is not None:
-                        forecast_available -= incremental
                     new_reserved += incremental
                     # Replace an old accounted cycle only when a fresh start is proposed.
                     reservations = [r for r in reservations if r.device_id != request.device_id]
@@ -649,7 +614,7 @@ def allocate(
                     continue
         decisions[request.device_id] = DeviceAllocation(request.device_id, "wait", why)
     next_state = replace(
-        state, reservations=tuple(reservations), confirmations=tuple(next_confirmations)
+        state, reservations=tuple(reservations), confirmations=()
     )
     return GroupAllocation(
         next_state,

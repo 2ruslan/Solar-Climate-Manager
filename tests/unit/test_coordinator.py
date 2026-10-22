@@ -272,10 +272,10 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.coordinator.data["soc"])
         self.assertTrue(self.coordinator.data["energy_data_invalid"])
 
-    async def test_old_forecast_used_but_old_measurements_rejected(self):
+    async def test_retired_forecast_is_ignored_and_old_measurements_rejected(self):
         self.states["sensor.forecast"].last_reported = clock.current - timedelta(days=2)
         self.coordinator._evaluate()
-        self.assertEqual(self.coordinator.data["forecast_power_now"], 2800)
+        self.assertNotIn("forecast_power_now", self.coordinator.data)
         self.assertTrue(self.coordinator.data["energy_allowed"])
         self.states["sensor.pv"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
@@ -285,6 +285,9 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_removed_settings_ignored_on_existing_entry(self):
         self.entry.options = {
             "forecast_detail_entity": "sensor.missing_detail",
+            "forecast_power_now_entity": "sensor.forecast",
+            "forecast_power_30m_entity": "sensor.forecast",
+            "forecast_power_60m_entity": "sensor.forecast",
             "forecast_updated_entity": "sensor.missing_timestamp",
             "forecast_max_data_age": 1,
             "forecast_horizon": 30,
@@ -299,7 +302,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_forecast_is_not_a_cached_numeric_value(self):
         self.put("sensor.forecast", "unavailable", unit_of_measurement="W")
         self.coordinator._evaluate()
-        self.assertIsNone(self.coordinator.data["forecast_power_now"])
+        self.assertNotIn("forecast_power_now", self.coordinator.data)
         self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
 
     async def test_configured_ac_meter_missing_is_not_silently_estimated(self):
@@ -756,12 +759,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.coordinator.data["energy_reason"], "grid_ready")
         self.hass.services.async_call.assert_not_called()
 
-    async def test_grid_energy_permission_still_protects_battery(self):
+    async def test_grid_energy_permission_ignores_discharge_but_requires_valid_soc(self):
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.put("sensor.battery", "500", unit_of_measurement="W")
         self.coordinator._evaluate()
-        self.assertFalse(self.coordinator.data["energy_allowed"])
-        self.assertEqual(self.coordinator.data["energy_reason"], "battery_discharge")
+        self.assertTrue(self.coordinator.data["energy_allowed"])
+        self.assertEqual(self.coordinator.data["energy_reason"], "grid_ready")
         self.put("sensor.soc", "unavailable")
         self.coordinator._evaluate()
         self.assertFalse(self.coordinator.data["energy_allowed"])

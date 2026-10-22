@@ -130,11 +130,12 @@ def read_sources(
     )
     limit_active = bool(limit_id) and data["grid_import_limit"] != 0
     data["grid_import_limit_active"] = limit_active
-    grid = _binary_value(raw["grid_available_entity"], now, settings["grid_max_data_age"])
+    # Availability is a persistent binary state, not a periodic measurement.
+    grid = _binary_value(raw["grid_available_entity"])
     if grid is not None and not settings["grid_on_means_available"]:
         grid = not grid
     schedule = (
-        _binary_value(raw["schedule_entity"], now, None)
+        _binary_value(raw["schedule_entity"])
         if settings.get("schedule_entity")
         else True
     )
@@ -148,8 +149,6 @@ def read_sources(
     ac_valid = (not settings.get("ac_power_entity") or data["ac_power"] is not None) and data[
         "house_load_power"
     ] is not None
-    forecast_keys = ("forecast_power_now", "forecast_power_30m", "forecast_power_60m")
-    forecasts = tuple(data[key] for key in forecast_keys)
     snapshot = EnergySnapshot(
         pv=data["pv_power"],
         load=data["load_power"],
@@ -159,7 +158,6 @@ def read_sources(
         grid_import_limit=data["grid_import_limit"],
         grid_limit_configured=limit_active,
         grid=grid,
-        forecasts=forecasts,
         actual_ac_power=actual_ac,
         ac_power_valid=ac_valid,
         temperature_valid=temperature is not None and climate_valid and ac_target is not None,
@@ -208,8 +206,6 @@ def read_sources(
         max_age = (
             settings["power_max_data_age"]
             if key in aged
-            else settings["grid_max_data_age"]
-            if key == "grid_available_entity"
             else None
         )
         value = normalized[key] if settings.get(key) else None
@@ -246,9 +242,7 @@ def _energy_value(state, now, max_age, kind):
     )
 
 
-def _binary_value(state, now, max_age):
+def _binary_value(state):
     if state is None or state.state not in ("on", "off"):
-        return None
-    if max_age is not None and not is_fresh(now, state.last_reported, max_age):
         return None
     return state.state == "on"

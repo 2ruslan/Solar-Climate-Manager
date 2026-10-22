@@ -23,7 +23,6 @@ POWER_KEYS = [
     "ac_power",
     "solar_margin",
     "average_solar_margin",
-    "forecast_margin",
 ]
 TEMPERATURE_KEYS = [
     "temperature",
@@ -51,6 +50,15 @@ ENUM_OPTIONS = {
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
+    from homeassistant.helpers import entity_registry as er
+
+    from .const import DOMAIN
+
+    registry = er.async_get(hass)
+    for key in ("forecast_power_now", "forecast_power_30m", "forecast_power_60m", "forecast_margin"):
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}")
+        if entity_id:
+            registry.async_remove(entity_id)
     async_add_entities(
         [
             SolarClimateSensor(entry.runtime_data, key)

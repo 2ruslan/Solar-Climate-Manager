@@ -8,9 +8,6 @@ from .strategy import STRATEGY_DEFAULTS
 DOMAIN = "solar_climate_manager"
 POWER_SOURCES = {
     "pv_power": "pv_power_entity",
-    "forecast_power_now": "forecast_power_now_entity",
-    "forecast_power_30m": "forecast_power_30m_entity",
-    "forecast_power_60m": "forecast_power_60m_entity",
 }
 ENERGY_SOURCES = {
     "load_power": "load_power_entity",
@@ -27,6 +24,9 @@ OPTIONAL_SOURCES = [
     *ENERGY_SOURCES.values(),
 ]
 REMOVED_FORECAST_SETTINGS = {
+    "forecast_power_now_entity",
+    "forecast_power_30m_entity",
+    "forecast_power_60m_entity",
     "forecast_detail_entity",
     "forecast_updated_entity",
     "forecast_max_data_age",
@@ -42,6 +42,10 @@ REMOVED_SETTINGS = (
     REMOVED_FORECAST_SETTINGS
     | {
         "max_data_age",
+        "grid_max_data_age",
+        "max_battery_discharge",
+        "start_delay",
+        "shortage_delay",
         "battery_charge_power_entity",
         "critical_soc",
         "battery_reserve_soc",

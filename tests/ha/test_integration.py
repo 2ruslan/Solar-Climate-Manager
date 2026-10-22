@@ -160,7 +160,7 @@ async def test_solar_sources_independent_of_temperature(hass):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.runtime_data.data["pv_power"] == 2800
-    assert entry.runtime_data.data["forecast_power_now"] is None
+    assert "forecast_power_now" not in entry.runtime_data.data
     hass.states.async_set("sensor.pv", "unavailable")
     await hass.async_block_till_done()
     assert entry.runtime_data.data["pv_power"] is None
@@ -176,13 +176,13 @@ async def test_solar_sources_independent_of_temperature(hass):
     assert entry.runtime_data.settings["pv_power_entity"] is None
 
 
-async def test_reject_energy_sensor_as_forecast(hass):
+async def test_reject_energy_sensor_as_solar_power(hass):
     states(hass)
     hass.states.async_set("sensor.energy", "5", {"unit_of_measurement": "kWh"})
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": SOURCE_USER},
-        data={**inputs(), "forecast_power_now_entity": "sensor.energy"},
+        data={**inputs(), "pv_power_entity": "sensor.energy"},
     )
     assert result["errors"]["base"] == "invalid_power"
 
@@ -485,7 +485,7 @@ async def setup_shadow_group(hass):
         "House", GroupSources(pv_power_entity="sensor.pv", load_power_entity="sensor.load",
                               soc_entity="sensor.soc", battery_power_entity="sensor.battery",
                               grid_available_entity="binary_sensor.grid"),
-        GroupPolicy(start_delay=0))[0])
+        GroupPolicy())[0])
     group_id = registry.groups[0].group_id
     await repository.async_update(lambda state: state.join(first.runtime_data.device_id, group_id)
                                   .join(second.runtime_data.device_id, group_id))
@@ -542,7 +542,7 @@ async def test_two_shadow_groups_keep_separate_budgets(hass):
     first, second, repository, first_group = await setup_shadow_group(hass)
     first_config = repository.registry.group(first_group)
     registry = await repository.async_update(lambda state: state.create(
-        "Workshop", first_config.sources, GroupPolicy(start_delay=0))[0])
+        "Workshop", first_config.sources, GroupPolicy())[0])
     second_group = registry.groups[1].group_id
     second_id = second.runtime_data.device_id
     await repository.async_update(lambda state: state.leave(second_id).join(second_id, second_group))
@@ -790,7 +790,7 @@ async def test_group_control_failure_isolated_between_groups(hass):
 
     first, second, repository, first_group = await setup_shadow_group(hass)
     registry = await repository.async_update(lambda state: state.create(
-        "Workshop", state.group(first_group).sources, GroupPolicy(start_delay=0))[0])
+        "Workshop", state.group(first_group).sources, GroupPolicy())[0])
     second_id = second.runtime_data.device_id
     await repository.async_update(lambda state: state.leave(second_id).join(second_id, registry.groups[1].group_id))
     records = []
@@ -989,7 +989,7 @@ async def test_group_control_deficit_sheds_only_lower_priority_member(hass):
     await hass.async_block_till_done()
     group = repository.registry.group(group_id)
     await repository.async_update(lambda state: state.update(replace(
-        group, policy=replace(group.policy, shortage_delay=0, grid_absence_delay=0))))
+        group, policy=replace(group.policy, grid_absence_delay=0))))
     await repository.async_update(lambda state: replace(state, memberships=tuple(
         replace(m, priority=10) if m.device_id == first.runtime_data.device_id else m
         for m in state.memberships)))

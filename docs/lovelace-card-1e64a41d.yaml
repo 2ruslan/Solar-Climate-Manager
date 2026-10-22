@@ -203,18 +203,6 @@ cards:
         suffix: " W"
         icon: "mdi:flash"
   - type: "entities"
-    title: "Сонце: прогноз"
-    show_header_toggle: false
-    entities:
-      - entity: "sensor.solar_climate_manager_climate_1e64a41d_forecast_power_now"
-        name: "Прогноз зараз"
-      - entity: "sensor.solar_climate_manager_climate_1e64a41d_forecast_power_in_30_minutes"
-        name: "Прогноз через 30 хв"
-      - entity: "sensor.solar_climate_manager_climate_1e64a41d_forecast_power_in_1_hour"
-        name: "Прогноз через годину"
-      - entity: "sensor.solar_climate_manager_climate_1e64a41d_forecast_budget_after_ac_and_reserves"
-        name: "Прогнозний баланс"
-  - type: "entities"
     title: "Таймери"
     show_header_toggle: false
     entities:

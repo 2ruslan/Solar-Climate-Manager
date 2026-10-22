@@ -32,13 +32,9 @@ class EnergyPolicyConfig:
     estimated_ac_power: float = 900
     minimum_soc: float = 85
     restart_soc: float = 90
-    max_battery_discharge: float = 100
-    start_delay: float = 600
-    shortage_delay: float = 600
     grid_absence_delay: float = 600
     minimum_run_time: float = 600
     minimum_off_time: float = 600
-    grid_max_data_age: float = 86400
     load_includes_ac: bool = True
     load_includes_battery_charging: bool = False
     grid_on_means_available: bool = True
@@ -63,7 +59,6 @@ class EnergySnapshot:
     grid_import_limit: float | None = None
     grid_limit_configured: bool = False
     grid: bool | None = None
-    forecasts: tuple[float | None, ...] = (None, None, None)
     actual_ac_power: float = 0
     ac_power_valid: bool = True
     temperature_valid: bool = True
@@ -110,7 +105,6 @@ class StrategyDecision:
     energy_allowed: bool
     intent: ControlIntent
     solar_margin: float | None
-    forecast_margin: float | None
     seconds_to_start: float | None = None
     seconds_to_stop: float | None = None
     average_solar_margin: float | None = None

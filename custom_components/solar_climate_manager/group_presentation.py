@@ -35,7 +35,6 @@ GROUP_REASONS = [
     "unresolved_reservation",
     "telemetry_unsettled",
     "insufficient_budget",
-    "forecast_deficit",
     "minimum_off",
     "start_confirmation",
     "observation",

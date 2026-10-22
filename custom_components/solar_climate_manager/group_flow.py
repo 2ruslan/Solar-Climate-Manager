@@ -19,12 +19,8 @@ GROUP_FLAGS = {
 POLICY_KEYS = {
     "minimum_soc",
     "restart_soc",
-    "max_battery_discharge",
-    "start_delay",
-    "shortage_delay",
     "grid_absence_delay",
     "power_max_data_age",
-    "grid_max_data_age",
 }
 ERRORS = {
     "switch_to_observation",
@@ -345,8 +341,7 @@ class GroupOptionsMixin:
         for key in sorted(POLICY_KEYS):
             fields[vol.Required(key, default=values[key])] = number(
                 maximum=100 if key in ("minimum_soc", "restart_soc") else 86400,
-                unit="%" if key in ("minimum_soc", "restart_soc") else
-                "W" if key == "max_battery_discharge" else "s",
+                unit="%" if key in ("minimum_soc", "restart_soc") else "s",
             )
         return self._group_form("group_settings", vol.Schema(fields), values, errors)
 
@@ -438,8 +433,6 @@ class GroupOptionsMixin:
                     maximum=100 if k in ("minimum_soc", "restart_soc") else 86400,
                     unit="%"
                     if k in ("minimum_soc", "restart_soc")
-                    else "W"
-                    if k == "max_battery_discharge"
                     else "s",
                 )
                 for k in sorted(POLICY_KEYS)

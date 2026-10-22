@@ -56,7 +56,7 @@ class SourceTests(unittest.TestCase):
         snapshot = self.capture(get_state)
         counts = Counter(call.args[0] for call in get_state.call_args_list)
         self.assertEqual(set(counts.values()), {1})
-        self.assertEqual(counts["sensor.forecast"], 1)
+        self.assertNotIn("sensor.forecast", counts)
         self.assertEqual(snapshot.captured_at, self.now)
         self.assertEqual(snapshot.readings["pv_power_entity"].reported_at, self.now)
         self.states["sensor.pv"].state = "100"
@@ -90,19 +90,37 @@ class SourceTests(unittest.TestCase):
         self.settings.pop("pv_power_entity")
         self.assertEqual(self.capture().readings["pv_power_entity"].status, "not_configured")
 
-    def test_temperature_forecast_schedule_and_limit_do_not_expire(self):
+    def test_temperature_schedule_and_limit_do_not_expire(self):
         self.settings.update(schedule_entity="schedule.room", grid_import_limit_entity="number.limit")
         self.put("schedule.room", "on")
         self.put("number.limit", "3", unit_of_measurement="kW")
         for key in ("sensor.room", "sensor.forecast", "schedule.room", "number.limit"):
             self.states[key].last_reported = self.now - timedelta(days=2)
         snapshot = self.capture()
-        for key in ("temperature_entity", "forecast_power_now_entity",
+        for key in ("temperature_entity",
                     "schedule_entity", "grid_import_limit_entity"):
             self.assertEqual(snapshot.readings[key].status, "valid")
         self.assertEqual(snapshot.temperature, 20)
         self.assertTrue(snapshot.energy.schedule_allowed)
         self.assertEqual(snapshot.energy.grid_import_limit, 3000)
+
+    def test_grid_availability_ignores_report_age_and_legacy_limit(self):
+        self.settings["grid_max_data_age"] = 0
+        for reported in (self.now - timedelta(days=365), self.now + timedelta(days=1)):
+            for state in ("on", "off"):
+                for on_means_available in (True, False):
+                    with self.subTest(reported=reported, state=state, polarity=on_means_available):
+                        self.put("binary_sensor.grid", state)
+                        self.states["binary_sensor.grid"].last_reported = reported
+                        self.settings["grid_on_means_available"] = on_means_available
+                        snapshot = self.capture()
+                        self.assertEqual(snapshot.energy.grid, (state == "on") == on_means_available)
+                        self.assertEqual(snapshot.readings["grid_available_entity"].status, "valid")
+        for state in ("unknown", "unavailable", "invalid"):
+            self.put("binary_sensor.grid", state)
+            self.assertIsNone(self.capture().energy.grid)
+        self.states.pop("binary_sensor.grid")
+        self.assertIsNone(self.capture().energy.grid)
 
     def test_units_signs_and_charging_are_normalized_once(self):
         self.settings.update(battery_positive="charge", grid_positive="export",

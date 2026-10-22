@@ -55,7 +55,6 @@ def build_state(
             "strategy_reason": strategy.reason,
             "solar_margin": strategy.solar_margin,
             "average_solar_margin": strategy.average_solar_margin,
-            "forecast_margin": strategy.forecast_margin,
             "seconds_to_start": round(strategy.seconds_to_start)
             if strategy.seconds_to_start is not None
             else None,

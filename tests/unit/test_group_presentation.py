@@ -17,7 +17,7 @@ flow = importlib.import_module(flow_module.GroupOptionsMixin.__module__)
 
 class GroupPresentationTests(unittest.TestCase):
     def setUp(self):
-        self.policy = groups.GroupPolicy(start_delay=0)
+        self.policy = groups.GroupPolicy()
         self.snapshot = a.GroupSnapshot(
             "group",
             1000,

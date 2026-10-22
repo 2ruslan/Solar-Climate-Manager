@@ -73,9 +73,9 @@ const TEXT = {
 export const fieldDefault = (field) => field.description?.suggested_value ?? field.default;
 export const fieldKind = (field) => Object.keys(field.selector || {})[0] || field.type;
 const SHARED_SECTIONS = {
-  grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay", "grid_max_data_age"],
-  battery: ["soc_entity", "minimum_soc", "restart_soc", "battery_power_entity", "battery_positive", "max_battery_discharge"],
-  solar: ["pv_power_entity", "forecast_power_now_entity", "forecast_power_30m_entity", "forecast_power_60m_entity", "start_delay", "shortage_delay"],
+  grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay"],
+  battery: ["soc_entity", "minimum_soc", "restart_soc", "battery_power_entity", "battery_positive"],
+  solar: ["pv_power_entity"],
   consumption: ["load_power_entity", "load_scope", "load_includes_battery_charging", "power_max_data_age"],
 };
 export function formDefaults(fields) {

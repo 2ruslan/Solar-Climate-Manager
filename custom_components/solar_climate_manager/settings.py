@@ -23,10 +23,6 @@ BOOLEAN_SETTINGS = [
 ADVANCED_KEYS = {"grid_absence_minutes"}
 FIXED_POLICY_KEYS = {
     "power_max_data_age",
-    "grid_max_data_age",
-    "max_battery_discharge",
-    "start_delay",
-    "shortage_delay",
     "minimum_run_time",
     "minimum_off_time",
 }

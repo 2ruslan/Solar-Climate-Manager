@@ -100,10 +100,7 @@
           "solar": {
             "name": "Solar generation",
             "data": {
-              "pv_power_entity": "Actual PV power sensor",
-              "forecast_power_now_entity": "Forecast solar power now sensor",
-              "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
-              "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor"
+              "pv_power_entity": "Actual PV power sensor"
             }
           },
           "consumption": {
@@ -126,9 +123,6 @@
         "title": "Data sources",
         "data": {
           "pv_power_entity": "Actual PV power sensor",
-          "forecast_power_now_entity": "Forecast solar power now sensor",
-          "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
-          "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
@@ -231,9 +225,6 @@
         "title": "Shared sources",
         "data": {
           "pv_power_entity": "Actual PV power sensor",
-          "forecast_power_now_entity": "Forecast solar power now sensor",
-          "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
-          "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
@@ -253,12 +244,8 @@
         "data": {
           "minimum_soc": "Charge for stopping (%)",
           "restart_soc": "Charge for resuming (%)",
-          "max_battery_discharge": "Allowed battery discharge at low SOC (W)",
-          "start_delay": "Stable budget before start (s)",
-          "shortage_delay": "Deficit duration before shedding (s)",
           "grid_absence_delay": "Grid absence before overriding minimum run (s)",
-          "power_max_data_age": "Maximum power report age (s)",
-          "grid_max_data_age": "Maximum grid availability report age (s)"
+          "power_max_data_age": "Maximum power report age (s)"
         },
         "description": "Policy is shared by all members. At most one new start awaits confirmation at a time."
       },
@@ -270,9 +257,6 @@
         "title": "Shared settings",
         "data": {
           "pv_power_entity": "Actual PV power sensor",
-          "forecast_power_now_entity": "Forecast solar power now sensor",
-          "forecast_power_30m_entity": "Forecast solar power in 30 minutes sensor",
-          "forecast_power_60m_entity": "Forecast solar power in 1 hour sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
           "battery_power_entity": "Signed battery power sensor",
@@ -286,12 +270,8 @@
           "load_scope": "Total meter coverage",
           "minimum_soc": "Charge for stopping (%)",
           "restart_soc": "Charge for resuming (%)",
-          "max_battery_discharge": "Allowed battery discharge at low SOC (W)",
-          "start_delay": "Stable budget before start (s)",
-          "shortage_delay": "Deficit duration before shedding (s)",
           "grid_absence_delay": "Grid absence before overriding minimum run (s)",
-          "power_max_data_age": "Maximum power report age (s)",
-          "grid_max_data_age": "Maximum grid availability report age (s)"
+          "power_max_data_age": "Maximum power report age (s)"
         },
         "description": "Changes apply to every member of this energy group."
       }
@@ -414,15 +394,6 @@
       "pv_power": {
         "name": "Actual PV power"
       },
-      "forecast_power_now": {
-        "name": "Forecast solar power now"
-      },
-      "forecast_power_30m": {
-        "name": "Forecast solar power in 30 minutes"
-      },
-      "forecast_power_60m": {
-        "name": "Forecast solar power in 1 hour"
-      },
       "load_power": {
         "name": "Total consumption power"
       },
@@ -440,9 +411,6 @@
       },
       "solar_margin": {
         "name": "Solar budget after AC"
-      },
-      "forecast_margin": {
-        "name": "Forecast budget after AC"
       },
       "seconds_to_start": {
         "name": "Time to possible start"
@@ -610,7 +578,6 @@
           "unresolved_reservation": "Unresolved reservation",
           "telemetry_unsettled": "Telemetry unsettled",
           "insufficient_budget": "Insufficient budget",
-          "forecast_deficit": "Forecast solar power is insufficient for a new start",
           "minimum_off": "Minimum off",
           "start_confirmation": "Start confirmation",
           "observation": "Observation",

@@ -34,8 +34,7 @@ SETTINGS_SECTIONS = {
         "battery_power_entity", "battery_positive",
     ),
     "solar": (
-        "pv_power_entity", "forecast_power_now_entity",
-        "forecast_power_30m_entity", "forecast_power_60m_entity",
+        "pv_power_entity",
     ),
     "consumption": (
         "load_power_entity", "load_includes_ac", "load_includes_battery_charging",

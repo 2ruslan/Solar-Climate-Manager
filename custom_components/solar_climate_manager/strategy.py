@@ -24,12 +24,10 @@ REASONS = [
     "invalid_energy_data",
     "low_soc",
     "soc_recovery",
-    "battery_discharge",
     "outage_deficit",
     "no_temperature_demand",
     "minimum_run",
     "insufficient_surplus",
-    "start_confirmation",
     "minimum_off",
     "solar_ready",
     "grid_ready",
@@ -74,10 +72,8 @@ def decide(
     state = deepcopy(policy)
     desired_running = observed_state.running
     solar_margin: float | None = None
-    forecast_margin: float | None = None
     average_margin: float | None = None
     grid_import_margin: float | None = None
-    observed = 0.0
     energy_allowed = False
     energy_reason = "invalid_energy_data"
 
@@ -95,7 +91,6 @@ def decide(
                 energy_allowed if allowed is None else allowed,
                 ControlIntent(desired_running),
                 solar_margin,
-                forecast_margin,
                 start,
                 stop,
                 average_margin,
@@ -155,18 +150,6 @@ def decide(
             energy_reason = "grid_import_limit"
             return halt(energy_reason)
 
-    # A validated grid budget can supply the AC even while the inverter chooses
-    # to discharge the battery for other loads. Keep the fallback protection
-    # when no finite import budget is configured.
-    if (
-        snapshot.grid
-        and grid_import_margin is None
-        and state.soc_blocked
-        and snapshot.battery > cfg.max_battery_discharge
-    ):
-        energy_reason = "battery_discharge"
-        return halt(energy_reason)
-
     if snapshot.grid:
         state.grid_absent_since = None
     elif state.grid_absent_since is None:
@@ -187,21 +170,8 @@ def decide(
         base = max(0, house_load - snapshot.actual_ac_power) if cfg.load_includes_ac else house_load
         required = base + cfg.estimated_ac_power
         solar_margin = round(snapshot.pv - required, 1)
-        state.window.observe(
-            now,
-            solar_margin,
-            required,
-            cfg.start_delay,
-        )
-        average_margin, average_required, observed = state.window.average(now, cfg.start_delay)
-        # observe() above guarantees at least one sample in the window.
-        assert average_margin is not None and average_required is not None
-        average_margin = round(average_margin, 1)
-        if snapshot.forecasts and all(
-            value is not None and isfinite(value) and value >= 0 for value in snapshot.forecasts
-        ):
-            forecasts = [value for value in snapshot.forecasts if value is not None]
-            forecast_margin = round(min(forecasts) - average_required, 1)
+        # Decisions use the current budget without a stabilization window.
+        state.window.clear()
     else:
         state.window.clear()
         if not snapshot.grid:
@@ -214,16 +184,8 @@ def decide(
             state.deficit_since = now
     else:
         state.deficit_since = None
-    shortage_left = (
-        remaining(now, state.deficit_since, cfg.shortage_delay)
-        if state.deficit_since is not None
-        else None
-    )
-    candidate = snapshot.grid or (
-        average_margin is not None
-        and average_margin >= 0
-        and (shortage_left is None or shortage_left > 0)
-    )
+    shortage_left = 0 if state.deficit_since is not None else None
+    candidate = snapshot.grid or (solar_margin is not None and solar_margin >= 0)
 
     energy_allowed = bool(candidate)
     energy_reason = (
@@ -271,17 +233,16 @@ def decide(
         return result("wait", "no_temperature_demand", candidate)
     if not candidate:
         return result("wait", "insufficient_surplus")
-    confirmation_left = 0 if snapshot.grid else max(0, cfg.start_delay - observed)
     off_left = (
         remaining(now, observed_state.last_stop, cfg.minimum_off_time)
         if observed_state.last_stop is not None
         else 0
     )
-    wait = max(confirmation_left, off_left)
+    wait = off_left
     if wait:
         return result(
             "wait",
-            "minimum_off" if off_left > confirmation_left else "start_confirmation",
+            "minimum_off",
             True,
             start=wait,
         )
