@@ -80,11 +80,11 @@ async def test_learned_policy_panel_reload_and_reset(hass):
     manager = coordinator.group_manager
     snapshot = manager._capture(repository.registry.group(group_id), repository.registry)
     own = next(r for r in snapshot.requests if r.device_id == coordinator.device_id)
-    assert own.policy.planned_watts == 1440
+    assert own.policy.planned_watts == 1200
     assert coordinator.settings["estimated_ac_power"] == 900
     panel = await async_overview(hass)
     device = next(d for d in panel["devices"] if d["device_id"] == coordinator.device_id)
-    assert device["planned_power"] == 1440
+    assert device["planned_power"] == 1200
     assert device["learning"]["confidence"] == "consistent"
     assert await hass.config_entries.async_reload(first.entry_id)
     await hass.async_block_till_done()
@@ -119,7 +119,7 @@ async def test_reset_cancel_stale_and_control_protection(hass):
 async def test_reset_preserves_unresolved_reservation(hass):
     first, _, repository, group_id = await enabled(hass)
     seed(first.runtime_data)
-    reserve = UnresolvedReservation(first.runtime_data.device_id, group_id, 1440)
+    reserve = UnresolvedReservation(first.runtime_data.device_id, group_id, 1200)
     await repository.async_update(lambda state: replace(state, unresolved=(reserve,)))
     form = await options(hass, first, "learning_reset")
     assert (await submit(hass, form, {}))["errors"]["base"] == "unresolved_reservation"

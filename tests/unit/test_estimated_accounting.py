@@ -19,25 +19,25 @@ class EstimatedAccountingTests(unittest.TestCase):
         self.snapshot = a.GroupSnapshot(
             "g", 1040, models.EnergySnapshot(pv=3000, load=800, soc=95, battery=0, grid=False),
             (self.request, a.DeviceRequest("b", self.member)), 1040)
-        self.reserve = a.Reservation("a", 1080, 999, phase="command_pending", sent_at=1000)
+        self.reserve = a.Reservation("a", 900, 999, phase="command_pending", sent_at=1000)
         self.state = a.AllocationState("g", (self.reserve,))
 
-    def test_estimate_plus_margin_reserves_capacity_before_start(self):
+    def test_exact_estimate_reserves_capacity_before_start(self):
         snapshot = replace(self.snapshot, requests=(replace(self.request, running=False),),
-                           energy=replace(self.snapshot.energy, pv=1800))
+                           energy=replace(self.snapshot.energy, pv=1699))
         result = a.allocate(snapshot, a.AllocationState("g"), self.policy, shadow=False)
         self.assertEqual(result.decisions[0].reason, "insufficient_budget")
-        result = a.allocate(replace(snapshot, energy=replace(snapshot.energy, pv=1880)),
+        result = a.allocate(replace(snapshot, energy=replace(snapshot.energy, pv=1700)),
                             a.AllocationState("g"), self.policy, shadow=False)
         self.assertEqual(result.decisions[0].action, "start")
-        self.assertEqual(result.reserved_watts, 1080)
+        self.assertEqual(result.reserved_watts, 900)
 
     def test_included_estimate_does_not_require_load_to_equal_estimate(self):
         # An inverter AC may consume less than its configured planning power.
         result = a.allocate(self.snapshot, self.state, self.policy, shadow=False)
         self.assertEqual(result.state.reservations[0].phase, "accounted")
         self.assertEqual(result.decisions[1].action, "start")
-        self.assertEqual(result.available_watts, 1120)  # 3000 - 800 - next start 1080
+        self.assertEqual(result.available_watts, 1300)  # 3000 - 800 - next start 900
         self.assertEqual(view.group_metrics(self.snapshot, result, self.policy)["group_load_power"], 800)
 
     def test_estimate_cannot_confirm_failed_restored_or_unacknowledged_start(self):
@@ -52,7 +52,7 @@ class EstimatedAccountingTests(unittest.TestCase):
                 state, pending, _ = a.reconcile(replace(self.snapshot, requests=(request,)),
                                                 replace(self.state, reservations=(reserve,)), self.policy)
                 self.assertNotEqual(state.reservations[0].phase, "accounted")
-                self.assertEqual(pending, 1080)
+                self.assertEqual(pending, 900)
 
     def test_stabilization_requires_new_aggregate_not_just_elapsed_time(self):
         for snapshot in (
@@ -61,18 +61,23 @@ class EstimatedAccountingTests(unittest.TestCase):
             replace(self.snapshot, load_reported_at=1000),
             replace(self.snapshot, complete=False),
             replace(self.snapshot, load_reported_at=1050),
-            replace(self.snapshot, now=2000),
         ):
             with self.subTest(snapshot=snapshot):
                 _, pending, _ = a.reconcile(snapshot, self.state, self.policy)
-                self.assertEqual(pending, 1080)
+                self.assertEqual(pending, 900)
+
+    def test_post_stabilization_report_does_not_expire(self):
+        snapshot = replace(self.snapshot, now=100000)
+        state, pending, _ = a.reconcile(snapshot, self.state, self.policy)
+        self.assertEqual(pending, 0)
+        self.assertEqual(state.reservations[0].phase, "accounted")
 
     def test_grid_limit_requires_post_stabilization_grid_report(self):
         snapshot = replace(self.snapshot, energy=replace(self.snapshot.energy, grid=True,
                            grid_limit_configured=True, grid_import_limit=4000, grid_power=1200),
                            grid_reported_at=1020)
         _, pending, _ = a.reconcile(snapshot, self.state, self.policy)
-        self.assertEqual(pending, 1080)
+        self.assertEqual(pending, 900)
         state, pending, _ = a.reconcile(replace(snapshot, grid_reported_at=1040), self.state, self.policy)
         self.assertEqual(pending, 0)
         self.assertEqual(state.reservations[0].phase, "accounted")
@@ -83,9 +88,9 @@ class EstimatedAccountingTests(unittest.TestCase):
         for current in (snapshot, replace(snapshot, load_reported_at=1020)):
             with self.subTest(report=current.load_reported_at):
                 result = a.allocate(current, self.state, policy, shadow=False)
-                self.assertEqual(result.available_watts, 1120)
+                self.assertEqual(result.available_watts, 1300)
                 metrics = view.group_metrics(current, result, policy)
-                self.assertEqual(metrics["group_load_power"] + metrics["group_reserved_power"], 1880)
+                self.assertEqual(metrics["group_load_power"] + metrics["group_reserved_power"], 1700)
 
     def test_uncertain_estimate_needs_explicit_off_and_fresh_settled_load(self):
         state = replace(self.state, reservations=(replace(self.reserve, phase="uncertain", stop_sent_at=1005),))
@@ -97,15 +102,15 @@ class EstimatedAccountingTests(unittest.TestCase):
         for stale in (replace(snapshot, load_reported_at=1030),
                       replace(snapshot, requests=(replace(request, state_observed_at=1004),))):
             _, pending, _ = a.reconcile(stale, state, self.policy)
-            self.assertEqual(pending, 1080)
+            self.assertEqual(pending, 900)
         _, pending, _ = a.reconcile(snapshot, self.state, self.policy)
-        self.assertEqual(pending, 1080)  # Off without dispatch is not proof.
+        self.assertEqual(pending, 900)  # Off without dispatch is not proof.
 
     def test_manual_estimated_start_waits_for_stabilization(self):
         result = a.allocate(replace(self.snapshot, load_reported_at=1020), a.AllocationState("g"), self.policy)
         self.assertEqual(result.decisions[1].reason, "telemetry_unsettled")
 
-    def test_mixed_group_requires_fresh_meter_without_inventing_estimated_measurement(self):
+    def test_mixed_group_accepts_old_meter_without_inventing_estimated_measurement(self):
         measured = a.DeviceRequest("meter", groups.MemberPolicy(ac_power_entity="sensor.ac"),
                                   running=True, measured_watts=500, power_reported_at=1040,
                                   state_reported_at=900)
@@ -114,26 +119,33 @@ class EstimatedAccountingTests(unittest.TestCase):
         self.assertEqual(pending, 0)
         stale = replace(snapshot, requests=(self.request, replace(measured, power_reported_at=1)))
         _, pending, _ = a.reconcile(stale, self.state, self.policy)
-        self.assertEqual(pending, 1080)
+        self.assertEqual(pending, 0)
 
     def test_legacy_reservation_is_not_automatically_converted(self):
         request = replace(self.request, policy=replace(self.member, power_accounting="legacy"))
         _, pending, _ = a.reconcile(replace(self.snapshot, requests=(request,)), self.state, self.policy)
-        self.assertEqual(pending, 1080)
+        self.assertEqual(pending, 900)
 
     def test_estimated_mode_ignores_retained_unused_meter(self):
         request = replace(self.request, measured_watts=float("nan"), power_reported_at=1,
                           policy=replace(self.member, ac_power_entity="sensor.old"))
-        self.assertEqual(request.watts, 1080)
+        self.assertEqual(request.watts, 900)
         _, pending, _ = a.reconcile(replace(self.snapshot, requests=(request,)), self.state, self.policy)
         self.assertEqual(pending, 0)
+
+    def test_retired_margin_does_not_change_planned_power(self):
+        for margin in (0, 20, 100):
+            policy = groups.MemberPolicy.from_settings({
+                "power_accounting": "estimated", "estimated_ac_power": 1200,
+                "power_margin_percent": margin,
+            })
+            self.assertEqual(policy.planned_watts, 1200)
 
     def test_policy_validation_and_meterless_legacy_fallback(self):
         self.assertEqual(groups.MemberPolicy.from_settings({}).power_accounting, "estimated")
         self.assertEqual(groups.MemberPolicy.from_settings({}).planned_watts, 900)
         for update in ({"power_accounting": "unknown"}, {"power_accounting": "meter"},
-                       {"power_margin_percent": -1}, {"power_margin_percent": 101},
-                       {"power_margin_percent": float("nan")}, {"power_settle_seconds": 0},
+                       {"power_settle_seconds": 0},
                        {"power_settle_seconds": True}, {"estimated_ac_power": 0}):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 groups.MemberPolicy.from_settings(update)

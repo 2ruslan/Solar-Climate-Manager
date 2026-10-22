@@ -106,9 +106,9 @@ def restore_runtime(
     observed, policy = ObservedDeviceState(), PolicyState()
     signature = saved.get("policy_signature")
     if isinstance(signature, dict):
-        signature = dict(signature)
+        signature = {key: value for key, value in signature.items() if key not in {"power_margin_percent", "power_max_data_age"}}
         # Missing new parameters mean the unchanged pre-estimation behavior.
-        for key, default in (("power_accounting", "legacy"), ("power_margin_percent", 20),
+        for key, default in (("power_accounting", "legacy"),
                              ("power_settle_seconds", 120), ("power_learning_enabled", False),
                              ("power_learning_generation", "")):
             if key in settings:

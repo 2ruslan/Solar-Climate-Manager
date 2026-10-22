@@ -37,6 +37,7 @@ class GroupTests(unittest.TestCase):
         data = groups.serialize_registry(self.registry)
         for group in data["groups"]:
             group["policy"]["grid_max_data_age"] = 1
+            group["policy"]["power_max_data_age"] = 1
             group["policy"]["max_battery_discharge"] = 1
             group["sources"]["forecast_power_now_entity"] = "sensor.retired"
             group["sources"]["forecast_power_30m_entity"] = "sensor.retired"
@@ -128,7 +129,7 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(state.readiness(self.first, frozenset({"one"})), "incomplete_sources")
         for kwargs in (
             {"minimum_soc": 90, "restart_soc": 85},
-            {"power_max_data_age": float("nan")},
+            {"grid_absence_delay": float("nan")},
             {"load_scope": "some_members"},
             {"grid_positive": "other"},
         ):

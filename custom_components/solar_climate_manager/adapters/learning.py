@@ -27,7 +27,6 @@ def learning_context(coordinator: Any, group: GroupConfig, members: tuple[Member
                 "power_learning_enabled",
                 "power_learning_generation",
                 "power_settle_seconds",
-                "power_margin_percent",
             )
         },
     ]

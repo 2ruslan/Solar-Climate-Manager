@@ -39,7 +39,7 @@ SETTINGS_SECTIONS = {
     "consumption": (
         "load_power_entity", "load_includes_ac", "load_includes_battery_charging",
         "ac_power_entity", "power_accounting", "estimated_ac_power",
-        "power_margin_percent", "power_settle_seconds", "power_learning_enabled",
+        "power_settle_seconds", "power_learning_enabled",
     ),
 }
 

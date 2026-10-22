@@ -4,7 +4,6 @@ import importlib
 import sys
 import types
 import unittest
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 package = types.ModuleType("scm_power_test")
@@ -38,19 +37,3 @@ class PowerTests(unittest.TestCase):
             (True, "W"),
         ]:
             self.assertIsNone(power.power_watts(value, unit))
-
-    def test_stale_and_future_never_become_zero(self):
-        now = datetime.now(timezone.utc)
-        for reported in [now - timedelta(seconds=901), now + timedelta(seconds=1)]:
-            self.assertIsNone(
-                power.read_power("2800", "W", now=now, reported=reported, max_age=900)
-            )
-        self.assertEqual(power.read_power("2.8", "kW", now=now, reported=now, max_age=900), 2800)
-
-    def test_independent_source_freshness(self):
-        now = datetime.now(timezone.utc)
-        reported = now - timedelta(seconds=1000)
-        self.assertIsNone(power.read_power(2800, "W", now=now, reported=reported, max_age=900))
-        self.assertEqual(
-            power.read_power(3000, "W", now=now, reported=reported, max_age=1800), 3000
-        )

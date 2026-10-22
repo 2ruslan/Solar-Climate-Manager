@@ -9,8 +9,8 @@ from ..climate_control import compensated_target, normalized_target
 from ..const import OPTIONAL_SOURCES, POWER_SOURCES
 from ..domain.sources import SourceReading, SourceSnapshot, SourceStatus
 from ..domain.types import DeviceConfig, EnergySnapshot
-from ..model import is_fresh, temperature_celsius
-from ..power import power_watts, read_power, signed_power_watts, soc_percent
+from ..model import temperature_celsius
+from ..power import power_watts, signed_power_watts, soc_percent
 from ..strategy import house_load_power
 
 
@@ -19,20 +19,13 @@ def climate_temperature(climate: Any, attribute: str, unit: str) -> float | None
     return temperature_celsius(climate.attributes.get(attribute), unit)
 
 
-def _status(entity_id, state, value, now, max_age) -> SourceStatus:
+def _status(entity_id, state, value) -> SourceStatus:
     if not entity_id:
         return "not_configured"
     if state is None:
         return "missing"
     if state.state in ("unknown", "unavailable"):
         return "unavailable"
-    reported = getattr(state, "last_reported", None)
-    if max_age is not None and reported is not None:
-        age = (now - reported).total_seconds()
-        if age < 0:
-            return "future"
-        if age > max_age:
-            return "stale"
     return "invalid" if value is None else "valid"
 
 
@@ -89,19 +82,8 @@ def read_sources(
     for key, source_key in POWER_SOURCES.items():
         source = raw[source_key]
         data[key] = (
-            (
-                read_power(
-                    source.state,
-                    source.attributes.get("unit_of_measurement"),
-                    now=now,
-                    reported=source.last_reported,
-                    max_age=settings["power_max_data_age"],
-                )
-                if key == "pv_power"
-                else power_watts(source.state, source.attributes.get("unit_of_measurement"))
-            )
-            if source
-            else None
+            power_watts(source.state, source.attributes.get("unit_of_measurement"))
+            if source else None
         )
     for key in (
         "load_power",
@@ -110,7 +92,7 @@ def read_sources(
         "soc",
         "ac_power",
     ):
-        data[key] = _energy_value(raw[f"{key}_entity"], now, settings["power_max_data_age"], key)
+        data[key] = _energy_value(raw[f"{key}_entity"], key)
     if data["battery_power"] is not None and settings["battery_positive"] == "charge":
         data["battery_power"] *= -1
     if data["grid_power"] is not None and settings["grid_positive"] == "export":
@@ -193,26 +175,13 @@ def read_sources(
         }
     )
     readings = {}
-    aged = {
-        "pv_power_entity",
-        "load_power_entity",
-        "battery_power_entity",
-        "grid_power_entity",
-        "soc_entity",
-        "ac_power_entity",
-    }
     for key in keys:
         source = raw[key]
-        max_age = (
-            settings["power_max_data_age"]
-            if key in aged
-            else None
-        )
         value = normalized[key] if settings.get(key) else None
         readings[key] = SourceReading(
             value,
             getattr(source, "last_reported", None),
-            _status(settings.get(key), source, value, now, max_age),
+            _status(settings.get(key), source, value),
         )
     return SourceSnapshot(
         captured_at=now,
@@ -228,8 +197,8 @@ def read_sources(
     )
 
 
-def _energy_value(state, now, max_age, kind):
-    if state is None or not is_fresh(now, state.last_reported, max_age):
+def _energy_value(state, kind):
+    if state is None:
         return None
     unit = state.attributes.get("unit_of_measurement")
     value = (

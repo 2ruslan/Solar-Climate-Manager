@@ -42,6 +42,8 @@ REMOVED_SETTINGS = (
     REMOVED_FORECAST_SETTINGS
     | {
         "max_data_age",
+        "power_max_data_age",
+        "power_margin_percent",
         "grid_max_data_age",
         "max_battery_discharge",
         "start_delay",
@@ -68,10 +70,8 @@ DEFAULTS = {
     "hysteresis": 1.0,
     "hvac_mode": "heat",
     "operation_mode": "observation",
-    "power_max_data_age": 900,
     "grid_absence_minutes": 10,
     "power_accounting": "legacy",
-    "power_margin_percent": 20,
     "power_settle_seconds": 120,
     "power_learning_enabled": False,
     "power_learning_generation": "",

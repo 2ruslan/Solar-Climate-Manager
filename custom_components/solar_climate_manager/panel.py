@@ -119,7 +119,7 @@ async def async_overview(hass):
             "temperature": data.get("temperature"), "target": settings["target_temperature"],
             "running": data.get("running") if loaded else None,
             "power_accounting": policy.power_accounting,
-            "planned_power": learning["effective_watts"] * (1 + policy.power_margin_percent / 100)
+            "planned_power": learning["effective_watts"]
             if learning and policy.power_accounting == "estimated" else policy.planned_watts,
             "learning": learning,
             "measured_power": data.get("ac_power") if policy.power_accounting != "estimated" else None,

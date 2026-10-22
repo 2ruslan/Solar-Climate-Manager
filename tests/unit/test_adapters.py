@@ -66,12 +66,12 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             snapshot.readings["pv_power_entity"] = None
 
-    def test_missing_unavailable_stale_future_and_invalid_are_distinct(self):
+    def test_measurement_values_are_validated_without_report_age(self):
         cases = [
             ("missing", None, None, None),
             ("unavailable", "unavailable", "W", self.now),
-            ("stale", "100", "W", self.now - timedelta(seconds=901)),
-            ("future", "100", "W", self.now + timedelta(seconds=1)),
+            ("valid", "100", "W", self.now - timedelta(seconds=901)),
+            ("valid", "100", "W", self.now + timedelta(seconds=1)),
             ("invalid", "100", "kWh", self.now),
             ("valid", "0", "W", self.now - timedelta(seconds=900)),
         ]
@@ -86,9 +86,20 @@ class SourceTests(unittest.TestCase):
                 reading = snapshot.readings["pv_power_entity"]
                 self.assertEqual(reading.status, status)
                 self.assertEqual(reading.reported_at, reported)
-                self.assertEqual(snapshot.energy.pv, 0 if status == "valid" else None)
+                self.assertEqual(snapshot.energy.pv, float(value) if status == "valid" else None)
         self.settings.pop("pv_power_entity")
         self.assertEqual(self.capture().readings["pv_power_entity"].status, "not_configured")
+
+    def test_energy_measurements_do_not_expire_even_with_saved_age_limit(self):
+        expected = self.capture().energy
+        self.settings["power_max_data_age"] = 1
+        for state in self.states.values():
+            state.last_reported = self.now - timedelta(days=365)
+        snapshot = self.capture()
+        self.assertEqual(snapshot.energy, expected)
+        for key in ("pv_power_entity", "load_power_entity", "battery_power_entity",
+                    "grid_power_entity", "soc_entity"):
+            self.assertEqual(snapshot.readings[key].status, "valid")
 
     def test_temperature_schedule_and_limit_do_not_expire(self):
         self.settings.update(schedule_entity="schedule.room", grid_import_limit_entity="number.limit")
@@ -187,8 +198,13 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(restored.observed, models.ObservedDeviceState(True, 100, 50))
         self.assertEqual(self.saved["policy_signature"]["target_temperature"], 23)
 
+    def test_retired_power_settings_preserve_observed_cycle(self):
+        self.saved["policy_signature"].update(power_margin_percent=20, power_max_data_age=900)
+        restored = storage.restore_runtime(self.saved, settings=self.settings, options={}, now=200)
+        self.assertEqual(restored.observed, models.ObservedDeviceState(True, 100, 50))
+
     def test_legacy_upgrade_preserves_observed_cycle_without_enabling_estimation(self):
-        for key in ("power_accounting", "power_margin_percent", "power_settle_seconds"):
+        for key in ("power_accounting", "power_settle_seconds"):
             self.saved["policy_signature"].pop(key)
         restored = storage.restore_runtime(self.saved, settings=self.settings, options={}, now=200)
         self.assertEqual(restored.observed, models.ObservedDeviceState(True, 100, 50))

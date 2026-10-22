@@ -68,7 +68,6 @@ class GroupPolicy:
     minimum_soc: float = 85
     restart_soc: float = 90
     grid_absence_delay: float = 600
-    power_max_data_age: float = 900
     load_includes_battery_charging: bool = False
     grid_on_means_available: bool = True
     battery_positive: Literal["charge", "discharge"] = "discharge"
@@ -81,7 +80,6 @@ class GroupPolicy:
             "minimum_soc",
             "restart_soc",
             "grid_absence_delay",
-            "power_max_data_age",
         ):
             value = getattr(self, name)
             if (
@@ -116,12 +114,11 @@ class MemberPolicy:
     minimum_off_time: float = 600
     ac_power_entity: str | None = None
     power_accounting: Literal["legacy", "meter", "estimated"] = "legacy"
-    power_margin_percent: float = 20
     power_settle_seconds: float = 120
 
     def __post_init__(self) -> None:
         for value in (self.estimated_ac_power, self.minimum_run_time, self.minimum_off_time,
-                      self.power_margin_percent, self.power_settle_seconds):
+                      self.power_settle_seconds):
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
@@ -133,7 +130,7 @@ class MemberPolicy:
             raise ValueError("invalid_member_policy")
         if self.power_accounting not in ("legacy", "meter", "estimated"):
             raise ValueError("invalid_member_policy")
-        if not 0 <= self.power_margin_percent <= 100 or not 30 <= self.power_settle_seconds <= 1800:
+        if not 30 <= self.power_settle_seconds <= 1800:
             raise ValueError("invalid_member_policy")
         if self.power_accounting == "meter" and not self.ac_power_entity:
             raise ValueError("missing_power_meter")
@@ -146,9 +143,7 @@ class MemberPolicy:
 
     @property
     def planned_watts(self) -> float:
-        return self.estimated_ac_power * (
-            1 + self.power_margin_percent / 100 if self.power_accounting == "estimated" else 1
-        )
+        return self.estimated_ac_power
 
     @classmethod
     def from_settings(cls, settings: dict[str, Any]) -> "MemberPolicy":
@@ -161,7 +156,6 @@ class MemberPolicy:
                     "minimum_off_time",
                     "ac_power_entity",
                     "power_accounting",
-                    "power_margin_percent",
                     "power_settle_seconds",
                 )
                 if key in settings
@@ -170,7 +164,7 @@ class MemberPolicy:
         # Old installations without a meter use aggregate-backed estimation.
         # A configured but unavailable meter must never silently become an estimate.
         if policy.power_accounting == "legacy" and not policy.ac_power_entity:
-            return replace(policy, power_accounting="estimated", power_margin_percent=0)
+            return replace(policy, power_accounting="estimated")
         return policy
 
 
@@ -356,7 +350,7 @@ def restore_registry(data: Any) -> GroupRegistry:
                     # Ignore retired limits when loading existing groups.
                     policy=GroupPolicy(**{
                         key: value for key, value in g["policy"].items()
-                        if key not in {"grid_max_data_age", "max_battery_discharge", "start_delay", "shortage_delay"}
+                        if key not in {"grid_max_data_age", "max_battery_discharge", "start_delay", "shortage_delay", "power_max_data_age"}
                     }),
                 )
                 for g in data["groups"]

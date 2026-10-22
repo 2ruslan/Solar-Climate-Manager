@@ -76,7 +76,7 @@ const SHARED_SECTIONS = {
   grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay"],
   battery: ["soc_entity", "minimum_soc", "restart_soc", "battery_power_entity", "battery_positive"],
   solar: ["pv_power_entity"],
-  consumption: ["load_power_entity", "load_scope", "load_includes_battery_charging", "power_max_data_age"],
+  consumption: ["load_power_entity", "load_scope", "load_includes_battery_charging"],
 };
 export function formDefaults(fields) {
   const result = {};

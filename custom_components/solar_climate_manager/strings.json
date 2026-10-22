@@ -112,7 +112,6 @@
               "ac_power_entity": "AC power sensor",
               "power_accounting": "Group power accounting",
               "estimated_ac_power": "Conservative estimated AC power (W)",
-              "power_margin_percent": "Estimated power margin (%)",
               "power_settle_seconds": "Stabilization after confirmation (s)",
               "power_learning_enabled": "Learn from aggregate consumption"
             }
@@ -158,7 +157,6 @@
           "minimum_soc": "Charge level for stopping (%)",
           "restart_soc": "Charge level for resuming operation (%)",
           "power_accounting": "Group power accounting",
-          "power_margin_percent": "Estimated power margin (%)",
           "power_settle_seconds": "Stabilization after confirmation (s)",
           "ac_power_entity": "AC power sensor (for metered accounting)",
           "power_learning_enabled": "Learn from aggregate consumption"
@@ -244,8 +242,7 @@
         "data": {
           "minimum_soc": "Charge for stopping (%)",
           "restart_soc": "Charge for resuming (%)",
-          "grid_absence_delay": "Grid absence before overriding minimum run (s)",
-          "power_max_data_age": "Maximum power report age (s)"
+          "grid_absence_delay": "Grid absence before overriding minimum run (s)"
         },
         "description": "Policy is shared by all members. At most one new start awaits confirmation at a time."
       },
@@ -270,8 +267,7 @@
           "load_scope": "Total meter coverage",
           "minimum_soc": "Charge for stopping (%)",
           "restart_soc": "Charge for resuming (%)",
-          "grid_absence_delay": "Grid absence before overriding minimum run (s)",
-          "power_max_data_age": "Maximum power report age (s)"
+          "grid_absence_delay": "Grid absence before overriding minimum run (s)"
         },
         "description": "Changes apply to every member of this energy group."
       }

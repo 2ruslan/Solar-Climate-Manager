@@ -1,9 +1,6 @@
 """Pure validation of measured power; never infer available surplus."""
 
-from datetime import datetime
 from math import isfinite
-
-from .model import is_fresh
 
 
 def power_watts(value, unit):
@@ -19,14 +16,6 @@ def power_watts(value, unit):
     elif unit != "W":
         return None
     return result if isfinite(result) and result >= 0 else None
-
-
-def read_power(value, unit, *, now: datetime, reported: datetime, max_age: float):
-    """Missing, stale and future data are unknown, rather than zero generation."""
-    if not is_fresh(now, reported, max_age):
-        return None
-    result = power_watts(value, unit)
-    return round(result, 1) if result is not None else None
 
 
 def signed_power_watts(value, unit):

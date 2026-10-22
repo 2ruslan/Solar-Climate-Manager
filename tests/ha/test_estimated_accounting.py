@@ -15,7 +15,7 @@ async def configure(hass, entry, **updates):
     form = await options(hass, entry, "energy")
     return await submit(hass, form, {
         "estimated_ac_power": 900, "power_accounting": "estimated",
-        "power_margin_percent": 20, "power_settle_seconds": 30, **updates,
+        "power_settle_seconds": 30, **updates,
     })
 
 
@@ -60,7 +60,7 @@ async def test_estimated_sequential_starts_wait_for_settled_reports(hass, freeze
         enable_group_control(first, second)
         await hass.async_block_till_done()
         assert len(records) == 1
-        assert repository.registry.unresolved[0].watts == 1080
+        assert repository.registry.unresolved[0].watts == 900
         freezer.tick(timedelta(seconds=1))
         report(hass, records[0])
         await hass.async_block_till_done()
@@ -82,7 +82,7 @@ async def test_estimated_sequential_starts_wait_for_settled_reports(hass, freeze
         assert repository.registry.unresolved[0].device_id == second.runtime_data.device_id
         snapshot = first.runtime_data.group_manager.snapshots[group_id]
         assert snapshot.requests[0].measured_watts is None
-        assert first.runtime_data.data["group_load_power"] == (800 if scope == "includes_all_members" else 1880)
+        assert first.runtime_data.data["group_load_power"] == (800 if scope == "includes_all_members" else 1700)
 
 
 async def test_estimated_form_validation_and_live_or_pending_changes_blocked(hass):
@@ -99,7 +99,7 @@ async def test_estimated_form_validation_and_live_or_pending_changes_blocked(has
         await hass.async_block_till_done()
         assert repository.registry.unresolved
         # Pending reservation has priority over mode checks, and is never erased.
-        result = await configure(hass, first, power_margin_percent=30)
+        result = await configure(hass, first, estimated_ac_power=1100)
         assert result["errors"]["base"] == "unresolved_reservation"
         first.runtime_data._set_operation_mode("observation")
         await hass.async_block_till_done()

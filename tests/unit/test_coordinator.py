@@ -259,7 +259,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(new.data["control_allowed"])
         self.hass.services.async_call.assert_not_called()
 
-    async def test_signed_sources_and_stale_soc(self):
+    async def test_signed_sources_and_old_soc_remain_valid(self):
         self.coordinator.settings["battery_positive"] = "charge"
         self.put("sensor.battery", "-500", unit_of_measurement="W")
         self.coordinator._evaluate()
@@ -269,17 +269,17 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
         self.states["sensor.soc"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
-        self.assertIsNone(self.coordinator.data["soc"])
-        self.assertTrue(self.coordinator.data["energy_data_invalid"])
+        self.assertEqual(self.coordinator.data["soc"], 95)
+        self.assertFalse(self.coordinator.data["energy_data_invalid"])
 
-    async def test_retired_forecast_is_ignored_and_old_measurements_rejected(self):
+    async def test_retired_forecast_is_ignored_and_old_measurements_remain_valid(self):
         self.states["sensor.forecast"].last_reported = clock.current - timedelta(days=2)
         self.coordinator._evaluate()
         self.assertNotIn("forecast_power_now", self.coordinator.data)
         self.assertTrue(self.coordinator.data["energy_allowed"])
         self.states["sensor.pv"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
-        self.assertIsNone(self.coordinator.data["pv_power"])
+        self.assertEqual(self.coordinator.data["pv_power"], 2800)
         self.assertEqual(self.coordinator.data["strategy_reason"], "grid_ready")
 
     async def test_removed_settings_ignored_on_existing_entry(self):
@@ -1013,7 +1013,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
         self.assertEqual(self.coordinator.data["energy_reason"], "grid_import_limit")
 
-    async def test_invalid_limit_and_stale_grid_meter_are_visible(self):
+    async def test_invalid_limit_blocks_but_old_grid_meter_remains_valid(self):
         self.coordinator.settings["grid_import_limit_entity"] = "number.limit"
         self.coordinator._evaluate()
         self.assertEqual(self.coordinator.data["energy_reason"], "grid_limit_unavailable")
@@ -1021,7 +1021,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("number.limit", "3000", unit_of_measurement="W")
         self.states["sensor.grid"].last_reported = clock.current - timedelta(seconds=901)
         self.coordinator._evaluate()
-        self.assertEqual(self.coordinator.data["energy_reason"], "grid_power_unavailable")
+        self.assertEqual(self.coordinator.data["energy_reason"], "grid_ready")
         self.put("binary_sensor.grid", "off")
         self.coordinator._evaluate()
         self.assertNotEqual(self.coordinator.data["energy_reason"], "grid_power_unavailable")

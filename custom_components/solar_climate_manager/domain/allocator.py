@@ -354,7 +354,7 @@ def _telemetry_ready(snapshot: GroupSnapshot, policy: GroupPolicy) -> bool:
     if (
         load_time is None
         or not isfinite(load_time)
-        or not 0 <= snapshot.now - load_time <= policy.power_max_data_age
+        or load_time > snapshot.now
     ):
         return False
     limited = (
@@ -366,7 +366,7 @@ def _telemetry_ready(snapshot: GroupSnapshot, policy: GroupPolicy) -> bool:
     if limited and (
         grid_time is None
         or not isfinite(grid_time)
-        or not 0 <= snapshot.now - grid_time <= policy.power_max_data_age
+        or grid_time > snapshot.now
     ):
         return False
     for request in snapshot.requests:
@@ -390,7 +390,7 @@ def _telemetry_ready(snapshot: GroupSnapshot, policy: GroupPolicy) -> bool:
             if (
                 power_time is None
                 or not isfinite(power_time)
-                or not 0 <= snapshot.now - power_time <= policy.power_max_data_age
+                or power_time > snapshot.now
             ):
                 return False
             if policy.load_scope == "includes_all_members" and power_time > load_time:

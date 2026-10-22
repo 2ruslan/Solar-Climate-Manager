@@ -39,7 +39,7 @@ def cycle(learning, offset=0, delta=1200):
 
 
 class LearningTests(unittest.TestCase):
-    def test_effective_policy_keeps_modes_and_applies_margin_once(self):
+    def test_effective_policy_uses_estimate_without_percentage_margin(self):
         group = groups.GroupConfig("g", "House")
         members = (groups.Membership("a", "g"),)
         settings = {
@@ -52,7 +52,7 @@ class LearningTests(unittest.TestCase):
         learner.samples, learner.updated_at = [1200] * 3, 100
         policy = groups.MemberPolicy(power_accounting="estimated")
         self.assertEqual(
-            adapter.effective_policy(coordinator, group, members, policy, 101).planned_watts, 1440
+            adapter.effective_policy(coordinator, group, members, policy, 101).planned_watts, 1200
         )
         self.assertEqual(
             adapter.effective_policy(
@@ -62,12 +62,12 @@ class LearningTests(unittest.TestCase):
         )
         settings["power_learning_enabled"] = False
         self.assertEqual(
-            adapter.effective_policy(coordinator, group, members, policy, 101).planned_watts, 1080
+            adapter.effective_policy(coordinator, group, members, policy, 101).planned_watts, 900
         )
         settings["power_learning_enabled"] = True
         changed = replace(group, sources=groups.GroupSources(load_power_entity="sensor.new"))
         self.assertEqual(
-            adapter.effective_policy(coordinator, changed, members, policy, 101).planned_watts, 1080
+            adapter.effective_policy(coordinator, changed, members, policy, 101).planned_watts, 900
         )
         self.assertEqual(learner.samples, [1200] * 3)  # capturing state is read-only
 

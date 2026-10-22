@@ -107,12 +107,11 @@ class SolarClimateSensor(SolarClimateEntity, SensorEntity):
             registry = manager.repository.registry if manager else None
             member = registry.membership(self.coordinator.device_id) if registry else None
             learning = self.coordinator.data.get("power_learning", {})
-            planned = learning.get("effective_watts", policy.estimated_ac_power) * (1 + policy.power_margin_percent / 100)
+            planned = learning.get("effective_watts", policy.estimated_ac_power)
             return {"group_id": member.group_id if member else None, "priority": member.priority if member else None,
                     "power_accounting": policy.power_accounting,
                     "planned_start_power_w": planned if policy.power_accounting == "estimated" else policy.planned_watts,
                     "power_learning": learning,
-                    "power_margin_percent": policy.power_margin_percent if policy.power_accounting == "estimated" else 0,
                     "power_settle_seconds": policy.power_settle_seconds if policy.power_accounting == "estimated" else None,
                     "preview": str(self.native_value).startswith("preview_"),
                     "budget_kind": "grid" if manager and member and manager.snapshots.get(member.group_id) and manager.snapshots[member.group_id].energy.grid else "solar"}
