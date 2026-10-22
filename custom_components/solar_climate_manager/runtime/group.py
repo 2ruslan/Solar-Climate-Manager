@@ -131,7 +131,7 @@ class GroupManager:
         registry = self.repository.registry
         return bool(registry and any(r.device_id == device_id for r in registry.unresolved))
 
-    @callback  # type: ignore[untyped-decorator]  # HA is absent from local mypy environment.
+    @callback
     def _changed(self, event: Any) -> None:
         self.request_evaluation()
 

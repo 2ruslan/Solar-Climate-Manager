@@ -176,6 +176,25 @@ async def test_solar_sources_independent_of_temperature(hass):
     assert entry.runtime_data.settings["pv_power_entity"] is None
 
 
+async def test_reload_removes_retired_forecast_entities(hass):
+    from homeassistant.helpers import entity_registry as er
+
+    entry = await setup(hass)
+    registry = er.async_get(hass)
+    retired = [
+        registry.async_get_or_create(
+            "sensor", DOMAIN, f"{entry.entry_id}_{key}", config_entry=entry,
+        ).entity_id
+        for key in ("forecast_power_now", "forecast_power_30m", "forecast_power_60m", "forecast_margin")
+    ]
+    temperature = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_temperature")
+    assert temperature is not None
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert all(registry.async_get(entity_id) is None for entity_id in retired)
+    assert registry.async_get(temperature) is not None
+
+
 async def test_reject_energy_sensor_as_solar_power(hass):
     states(hass)
     hass.states.async_set("sensor.energy", "5", {"unit_of_measurement": "kWh"})
