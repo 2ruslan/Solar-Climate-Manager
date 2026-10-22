@@ -50,6 +50,7 @@ def capture_group(
             DeviceConfig.from_settings(settings),
             temperature_unit,
             now,
+            last_temperature=coordinator.last_temperature,
         )
         captured = source
         demand = evaluate(

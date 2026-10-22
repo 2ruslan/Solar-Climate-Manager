@@ -454,7 +454,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.coordinator.data["running"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
 
-    async def test_unavailable_temperature_still_stops_actual_climate(self):
+    async def test_unavailable_temperature_keeps_last_value_and_actual_climate_running(self):
         await self.control_mode()
         self.own_update()
         if self.coordinator.commands.task:
@@ -462,9 +462,32 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("sensor.room", "unavailable", unit_of_measurement="°C")
         self.coordinator._evaluate()
         await self.coordinator.commands.task
-        self.assertIsNone(self.coordinator.data["temperature"])
-        self.assertTrue(self.coordinator.data["invalid_data"])
-        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+        self.assertEqual(self.coordinator.data["temperature"], 20)
+        self.assertFalse(self.coordinator.data["invalid_data"])
+        self.assertTrue(self.coordinator.data["running"])
+        self.assertEqual(self.hass.services.async_call.await_count, 1)
+
+    async def test_last_temperature_survives_reload_while_sensor_unavailable(self):
+        await self.coordinator.async_shutdown()
+        self.put("sensor.room", "unavailable", unit_of_measurement="°C")
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertEqual(new.data["temperature"], 20)
+        self.assertTrue(new.data["demand"])
+        self.put("sensor.room", "25", unit_of_measurement="°C")
+        new._evaluate()
+        self.assertEqual(new.data["temperature"], 25)
+        self.assertFalse(new.data["demand"])
+        await new.async_shutdown()
+
+    async def test_cached_temperature_does_not_transfer_to_another_sensor(self):
+        await self.coordinator.async_shutdown()
+        self.entry.options["temperature_entity"] = "sensor.other_room"
+        new = adapter.SolarClimateCoordinator(self.hass, self.entry)
+        await new.async_initialize()
+        self.assertIsNone(new.data["temperature"])
+        self.assertTrue(new.data["invalid_data"])
+        await new.async_shutdown()
 
     async def test_old_temperature_survives_reload_and_updates_when_source_changes(self):
         self.entry.options["max_data_age"] = 1
@@ -483,12 +506,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         for value in ("unknown", "unavailable", "nan", "bad"):
             self.put("sensor.room", value, unit_of_measurement="°C")
             new._evaluate()
-            self.assertIsNone(new.data["temperature"])
-            self.assertTrue(new.data["invalid_data"])
+            self.assertEqual(new.data["temperature"], 25)
+            self.assertFalse(new.data["invalid_data"])
         del self.states["sensor.room"]
         new._evaluate()
-        self.assertIsNone(new.data["temperature"])
-        self.assertTrue(new.data["invalid_data"])
+        self.assertEqual(new.data["temperature"], 25)
+        self.assertFalse(new.data["invalid_data"])
 
     async def test_cooling_command(self):
         self.coordinator.settings["hvac_mode"] = "cool"

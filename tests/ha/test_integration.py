@@ -108,8 +108,9 @@ async def test_observation_and_unavailable_data(hass):
         assert coordinator.data["demand"]
         hass.states.async_set("sensor.room", "unavailable")
         await hass.async_block_till_done()
-        assert coordinator.data["invalid_data"]
-        assert not coordinator.data["demand"]
+        assert not coordinator.data["invalid_data"]
+        assert coordinator.data["temperature"] == 23
+        assert coordinator.data["demand"]
         calls.assert_not_called()
 
 

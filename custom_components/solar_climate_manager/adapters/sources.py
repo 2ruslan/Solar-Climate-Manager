@@ -35,6 +35,7 @@ def read_sources(
     device: DeviceConfig,
     temperature_unit: str,
     now: datetime,
+    last_temperature: float | None = None,
 ) -> SourceSnapshot:
     keys = ("temperature_entity", "climate_entity", *OPTIONAL_SOURCES)
     # HA State objects are immutable; the entire capture is synchronous (no awaits).
@@ -51,6 +52,9 @@ def read_sources(
         if state
         else None
     )
+    measured_temperature = temperature
+    if temperature is None:
+        temperature = last_temperature
     climate_valid = (
         climate is not None
         and climate.state not in ("unknown", "unavailable")
@@ -155,7 +159,7 @@ def read_sources(
         else None
     )
     normalized = {
-        "temperature_entity": temperature,
+        "temperature_entity": measured_temperature,
         "climate_entity": climate.state if climate_available else None,
         "grid_available_entity": grid,
         "schedule_entity": schedule,

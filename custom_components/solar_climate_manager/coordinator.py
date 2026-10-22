@@ -15,6 +15,7 @@ from .domain.learning import PowerLearning
 from .domain.types import DeviceConfig
 from .history import DiagnosticHistory
 from .manual import control_fingerprint
+from .model import temperature_celsius
 from .presentation import build_state
 from .runtime.commands import CommandExecutor
 from .runtime.device import DeviceRuntime
@@ -38,6 +39,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.settings.pop("temporary_block_date", None)
         self.store = create_store(hass, entry.entry_id)
         self.runtime = DeviceRuntime(self.settings)
+        self.last_temperature = None
         self.power_learning = PowerLearning()
         self.commands = CommandExecutor(
             hass, entry, self.runtime, lambda: self.data, self._evaluate, self._publish_command_error
@@ -50,6 +52,10 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
 
     async def async_initialize(self):
         saved = await self.store.async_load()
+        if isinstance(saved, dict) and saved.get("temperature_entity") == self.settings["temperature_entity"]:
+            value = saved.get("last_temperature")
+            if not isinstance(value, bool):
+                self.last_temperature = temperature_celsius(value, "°C")
         now = dt_util.utcnow().timestamp()
         self.runtime.restore(saved, self.entry.options, now)
         self.power_learning.restore(saved.get("power_learning") if isinstance(saved, dict) else None, now)
@@ -76,7 +82,11 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         await self.store.async_save(self._stored_state())
 
     def _stored_state(self):
-        return {**self.runtime.stored_state(), "power_learning": self.power_learning.stored()}
+        return {
+            **self.runtime.stored_state(), "power_learning": self.power_learning.stored(),
+            "temperature_entity": self.settings["temperature_entity"],
+            "last_temperature": self.last_temperature,
+        }
 
     @callback
     def _state_changed(self, event):
@@ -116,7 +126,9 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         sources = read_sources(
             self.hass.states.get, settings, self.runtime.device,
             self.hass.config.units.temperature_unit, now,
+            last_temperature=self.last_temperature,
         )
+        self.last_temperature = sources.temperature
         decision, strategy, manual = self.runtime.evaluate(sources, now, today)
         data = build_state(
             sources, decision, strategy, self.runtime.policy,

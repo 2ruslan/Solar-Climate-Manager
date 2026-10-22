@@ -85,6 +85,36 @@ async def test_estimated_sequential_starts_wait_for_settled_reports(hass, freeze
         assert first.runtime_data.data["group_load_power"] == (800 if scope == "includes_all_members" else 1700)
 
 
+async def test_group_keeps_running_with_last_temperature_until_sensor_recovers(hass, freezer):
+    first, second, _, group_id = await prepare(hass)
+    records = []
+
+    async def service(domain, name, data, **kwargs):
+        records.append((name, data, kwargs["context"]))
+
+    with patch.object(type(hass.services), "async_call", side_effect=service):
+        enable_group_control(first)
+        await hass.async_block_till_done()
+        freezer.tick(timedelta(seconds=1))
+        report(hass, records[0])
+        await hass.async_block_till_done()
+        previous_temperature = first.runtime_data.data["temperature"]
+        entity = first.runtime_data.settings["temperature_entity"]
+        hass.states.async_set(entity, "unavailable")
+        await hass.async_block_till_done()
+        assert first.runtime_data.data["temperature"] == previous_temperature
+        snapshot = first.runtime_data.group_manager.snapshots[group_id]
+        request = next(r for r in snapshot.requests if r.device_id == first.runtime_data.device_id)
+        assert request.temperature_valid
+        assert request.demand
+        assert request.running
+        assert all(name != "set_hvac_mode" for name, _, _ in records)
+        hass.states.async_set(entity, "30", {"unit_of_measurement": "°C"})
+        await hass.async_block_till_done()
+        assert first.runtime_data.data["temperature"] == 30
+        assert not first.runtime_data.data["demand"]
+
+
 async def test_estimated_form_validation_and_live_or_pending_changes_blocked(hass):
     first, second, repository, _ = await setup_shadow_group(hass)
     assert first.runtime_data.settings["power_accounting"] == "legacy"

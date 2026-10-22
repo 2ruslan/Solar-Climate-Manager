@@ -101,6 +101,22 @@ class SourceTests(unittest.TestCase):
                     "grid_power_entity", "soc_entity"):
             self.assertEqual(snapshot.readings[key].status, "valid")
 
+    def test_cached_temperature_retains_source_status_and_compensation(self):
+        expected_target = self.capture().ac_target_temperature
+        for value, status in (("unavailable", "unavailable"), ("nan", "invalid")):
+            with self.subTest(value=value):
+                self.put("sensor.room", value, unit_of_measurement="°C")
+                snapshot = sources.read_sources(
+                    self.states.get, self.settings,
+                    models.DeviceConfig.from_settings(self.settings), "°C", self.now,
+                    last_temperature=20,
+                )
+                self.assertEqual(snapshot.temperature, 20)
+                self.assertTrue(snapshot.energy.temperature_valid)
+                self.assertEqual(snapshot.readings["temperature_entity"].status, status)
+                self.assertIsNone(snapshot.readings["temperature_entity"].value)
+                self.assertEqual(snapshot.ac_target_temperature, expected_target)
+
     def test_temperature_schedule_and_limit_do_not_expire(self):
         self.settings.update(schedule_entity="schedule.room", grid_import_limit_entity="number.limit")
         self.put("schedule.room", "on")
