@@ -27,6 +27,7 @@ REASONS = [
     "outage_deficit",
     "no_temperature_demand",
     "minimum_run",
+    "temperature_maintenance",
     "insufficient_surplus",
     "minimum_off",
     "solar_ready",
@@ -210,24 +211,16 @@ def decide(
         return halt("invalid_energy_data", reset_energy=False)
 
     if observed_state.running:
-        run_left = remaining(now, observed_state.last_start, cfg.minimum_run_time)
-        if not demand and run_left == 0:
-            return halt("no_temperature_demand", reset_energy=False)
-        deadlines = [
-            value
-            for value in (outage_deadline, run_left if not demand else None)
-            if value is not None
-        ]
         reason = (
             "outage_deficit"
             if outage_deadline is not None
-            else "minimum_run"
+            else "temperature_maintenance"
             if not demand
             else "grid_ready"
             if snapshot.grid
             else "running"
         )
-        return result("continue", reason, candidate, stop=min(deadlines) if deadlines else None)
+        return result("continue", reason, candidate, stop=outage_deadline)
 
     if not demand:
         return result("wait", "no_temperature_demand", candidate)

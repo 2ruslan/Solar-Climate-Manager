@@ -508,7 +508,7 @@ class AllocatorTests(unittest.TestCase):
             self.assertFalse(any(d.action == "start" for d in result.decisions))
             self.assertEqual(result.decisions[0].reason, "telemetry_unsettled")
 
-    def test_stop_proposal_does_not_fund_another_start_before_measurement(self):
+    def test_maintenance_does_not_fund_another_start_before_measurement(self):
         running = replace(
             self.requests[0],
             running=True,
@@ -521,7 +521,7 @@ class AllocatorTests(unittest.TestCase):
         result = self.run_allocation(
             requests=(running, self.requests[1]), energy=replace(self.energy, load=1500)
         )
-        self.assertEqual(self.actions(result)["a"][0], "stop")
+        self.assertEqual(self.actions(result)["a"], ("continue", "temperature_maintenance"))
         self.assertEqual(self.actions(result)["b"][0], "wait")
         self.assertEqual(result.available_watts, 100)
 

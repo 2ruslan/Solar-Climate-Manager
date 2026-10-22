@@ -519,7 +519,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await self.control_mode()
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "cool")
 
-    async def test_temperature_satisfied_stops_after_minimum_run(self):
+    async def test_temperature_satisfied_lowers_target_and_keeps_running(self):
         await self.control_mode()
         self.own_update()
         if self.coordinator.commands.task:
@@ -531,7 +531,45 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         clock.current += timedelta(seconds=600)
         self.coordinator._evaluate()
         await self.coordinator.commands.task
-        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+        payload = self.hass.services.async_call.call_args.args[2]
+        self.assertEqual(payload["hvac_mode"], "heat")
+        self.assertEqual(payload["temperature"], self.coordinator.settings["target_temperature"])
+        self.assertEqual(self.coordinator.data["strategy_reason"], "temperature_maintenance")
+        maintenance_target = payload["temperature"]
+        self.own_update(temperature=maintenance_target)
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        clock.current += timedelta(seconds=61)
+        self.states["climate.ac"].attributes["current_temperature"] = 26
+        self.coordinator._evaluate()
+        await self.coordinator.commands.task
+        self.assertEqual(self.coordinator.data["ac_target_temperature"], maintenance_target)
+        self.assertEqual(self.hass.services.async_call.await_count, 1)
+        self.put("sensor.room", "20", unit_of_measurement="°C")
+        self.coordinator._evaluate()
+        await self.coordinator.commands.task
+        payload = self.hass.services.async_call.call_args.args[2]
+        self.assertEqual(payload["hvac_mode"], "heat")
+        self.assertGreater(payload["temperature"], maintenance_target)
+        self.assertTrue(self.coordinator.data["demand"])
+
+    async def test_cooling_maintenance_raises_target_instead_of_switching_off(self):
+        self.coordinator.settings["hvac_mode"] = "cool"
+        self.put("sensor.room", "28", unit_of_measurement="°C")
+        await self.control_mode()
+        initial_target = self.hass.services.async_call.call_args.args[2]["temperature"]
+        self.own_update(mode="cool", temperature=initial_target)
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        clock.current += timedelta(seconds=601)
+        self.put("sensor.room", "20", unit_of_measurement="°C")
+        self.coordinator._evaluate()
+        await self.coordinator.commands.task
+        payload = self.hass.services.async_call.call_args.args[2]
+        self.assertEqual(payload["hvac_mode"], "cool")
+        self.assertGreater(payload["temperature"], initial_target)
+        self.assertEqual(payload["temperature"], self.coordinator.settings["target_temperature"])
+        self.assertEqual(self.coordinator.data["strategy_reason"], "temperature_maintenance")
 
     async def test_shutdown_cancels_pending_command(self):
         await self.coordinator.async_set_mode("control")

@@ -38,6 +38,7 @@ class CommandExecutor:
         self.closed = False
         self.authority = None
         self.device_id = None
+        self.maintenance_target_active = False
 
     def schedule(self):
         if not self.closed and self.task is None and self.get_data()["control_allowed"]:
@@ -118,7 +119,7 @@ class CommandExecutor:
                     self.hass.config.units.temperature_unit,
                 )
                 target = normalized_target(
-                    compensated_target(
+                    self.runtime.device.target_temperature if not self.runtime.demand else compensated_target(
                         self.runtime.device.target_temperature,
                         data["temperature"],
                         data["ac_temperature"],
@@ -155,13 +156,15 @@ class CommandExecutor:
                     pass
             if climate.state == mode and (
                 temperature_matches(climate.attributes.get("temperature"), target)
-                or current_valid and self.state.error == "none" and not compensation_needed(
+                or self.runtime.demand and not self.maintenance_target_active
+                and current_valid and self.state.error == "none" and not compensation_needed(
                     current_target, data["ac_temperature"], mode
                 )
             ):
                 self.state.last_command = None
                 self.state.unconfirmed_start = False
                 self._set_command_error("none")
+                self.maintenance_target_active = not self.runtime.demand
                 return None
             return "set_temperature", {"hvac_mode": mode, "temperature": target}
         if climate.state == "off" and not self.state.unconfirmed_start:
@@ -237,6 +240,7 @@ class CommandExecutor:
                 if service == "set_temperature":
                     self.state.last_target_update = now
                     self.state.unconfirmed_start = True
+                    self.maintenance_target_active = not self.runtime.demand
                 try:
                     async with asyncio.timeout(COMMAND_TIMEOUT_SECONDS):
                         await self.hass.services.async_call(

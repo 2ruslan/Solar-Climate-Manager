@@ -505,16 +505,10 @@ def allocate(
                 request.device_id, "wait", request.operation_mode
             )
         elif request.running:
-            run_ready = (
-                request.last_start is not None
-                and now - request.last_start >= request.policy.minimum_run_time
-            )
             if (
                 hard
                 or not request.temperature_valid
                 or not request.schedule_allowed
-                or not request.demand
-                and run_ready
             ):
                 why = (
                     reason
@@ -522,8 +516,6 @@ def allocate(
                     else "invalid_temperature"
                     if not request.temperature_valid
                     else "outside_schedule"
-                    if not request.schedule_allowed
-                    else "no_temperature_demand"
                 )
                 decisions[request.device_id] = DeviceAllocation(request.device_id, "stop", why)
                 deficit = max(0.0, deficit - (request.watts or 0))
@@ -531,7 +523,7 @@ def allocate(
                 decisions[request.device_id] = DeviceAllocation(
                     request.device_id,
                     "continue",
-                    "minimum_run" if not request.demand else "running",
+                    "temperature_maintenance" if not request.demand else "running",
                 )
                 candidates.append(request)
         else:

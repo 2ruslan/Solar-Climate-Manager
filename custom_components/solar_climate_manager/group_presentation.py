@@ -29,6 +29,7 @@ GROUP_REASONS = [
     "outside_schedule",
     "no_temperature_demand",
     "minimum_run",
+    "temperature_maintenance",
     "running",
     "device_unavailable",
     "command_unconfirmed",

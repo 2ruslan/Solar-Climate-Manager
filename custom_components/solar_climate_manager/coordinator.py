@@ -1,6 +1,7 @@
 """Event-driven observation and real climate control."""
 
 import logging
+from dataclasses import replace
 from datetime import timedelta
 
 from homeassistant.core import callback
@@ -10,6 +11,7 @@ from homeassistant.util import dt as dt_util
 
 from .adapters.sources import read_sources
 from .adapters.storage import create_store
+from .climate_control import normalized_target
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .domain.learning import PowerLearning
 from .domain.types import DeviceConfig
@@ -130,6 +132,14 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         )
         self.last_temperature = sources.temperature
         decision, strategy, manual = self.runtime.evaluate(sources, now, today)
+        if decision.data_valid and not decision.demand:
+            climate = self.hass.states.get(settings["climate_entity"])
+            unit = self.hass.config.units.temperature_unit
+            target = normalized_target(
+                self.runtime.device.target_temperature, climate.attributes, unit, clamp=True,
+                bounds_c=(self.runtime.device.ac_min_temperature, self.runtime.device.ac_max_temperature),
+            )
+            sources = replace(sources, ac_target_temperature=temperature_celsius(target, unit))
         data = build_state(
             sources, decision, strategy, self.runtime.policy,
             operation_mode=settings["operation_mode"], manual=manual,

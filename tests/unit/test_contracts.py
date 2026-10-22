@@ -39,8 +39,8 @@ class PolicyContractTests(unittest.TestCase):
         result = policy.decide(
             self.snapshot, self.observed, self.state, self.cfg, now=1100, demand=False,
         )
-        self.assertEqual(result.decision.reason, "minimum_run")
-        self.assertEqual(result.decision.seconds_to_stop, 540)
+        self.assertEqual(result.decision.reason, "temperature_maintenance")
+        self.assertIsNone(result.decision.seconds_to_stop)
 
     def test_protective_stop_preserves_running_until_device_report(self):
         self.observed = policy.ObservedDeviceState(running=True, last_start=900)

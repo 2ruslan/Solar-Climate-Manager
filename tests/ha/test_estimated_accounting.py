@@ -113,6 +113,14 @@ async def test_group_keeps_running_with_last_temperature_until_sensor_recovers(h
         await hass.async_block_till_done()
         assert first.runtime_data.data["temperature"] == 30
         assert not first.runtime_data.data["demand"]
+        freezer.tick(timedelta(seconds=601))
+        hass.states.async_set("sensor.load", "1000", {"unit_of_measurement": "W"}, force_update=True)
+        first.runtime_data._evaluate()
+        await hass.async_block_till_done()
+        assert first.runtime_data.data["group_reason"] == "temperature_maintenance"
+        assert all(name != "set_hvac_mode" for name, _, _ in records)
+        assert records[-1][1]["temperature"] == first.runtime_data.settings["target_temperature"]
+        assert first.runtime_data.data["ac_target_temperature"] == first.runtime_data.settings["target_temperature"]
 
 
 async def test_estimated_form_validation_and_live_or_pending_changes_blocked(hass):

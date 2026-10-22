@@ -275,10 +275,10 @@ class StrategyTests(unittest.TestCase):
     def test_temperature_cycle_and_minimum_off(self):
         grid = replace(self.snapshot, grid=True)
         self.decide(0, grid)
-        self.assertEqual(self.decide(60, grid, demand=False).reason, "minimum_run")
-        self.assertEqual(self.decide(120, grid, demand=False).action, "stop")
-        self.assertEqual(self.decide(121, grid).reason, "minimum_off")
-        self.assertEqual(self.decide(240, grid).action, "start")
+        self.assertEqual(self.decide(60, grid, demand=False).reason, "temperature_maintenance")
+        self.assertEqual(self.decide(120, grid, demand=False).action, "continue")
+        self.assertEqual(self.decide(121, grid).action, "continue")
+        self.assertEqual(self.decide(240, grid).action, "continue")
 
     def test_manual_schedule_disabled(self):
         self.assertEqual(self.decide(0, manual=True).reason, "manual_pause")
