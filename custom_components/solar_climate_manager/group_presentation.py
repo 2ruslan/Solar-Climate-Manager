@@ -6,6 +6,8 @@ from .domain.allocator import GroupAllocation, GroupSnapshot, member_load
 from .domain.groups import GroupPolicy
 
 GROUP_REASONS = [
+    "low_outdoor_temperature",
+    "outdoor_temperature_unavailable",
     "independent",
     "group_not_ready",
     "group_store_unavailable",

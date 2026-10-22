@@ -5,6 +5,7 @@ BASE_MODES = OPERATION_MODES[:3]
 
 # key: min, max, step, unit
 NUMERIC_SETTINGS = {
+    "minimum_outdoor_temperature": (-50, 50, 0.5, "°C"),
     "ac_min_temperature": (5, 35, 0.5, "°C"),
     "ac_max_temperature": (5, 35, 0.5, "°C"),
     "estimated_ac_power": (100, 10000, 50, "W"),
@@ -51,6 +52,8 @@ def configuration_values(data, options, defaults, removed):
 
 
 COMFORT_KEYS = {
+    "outdoor_temperature_entity",
+    "minimum_outdoor_temperature",
     "ac_min_temperature",
     "ac_max_temperature",
     "temperature_entity",

@@ -81,6 +81,7 @@ def capture_group(
                 source.climate_valid,
                 source.energy.schedule_allowed,
                 source.energy.temperature_valid,
+                outdoor_block_reason=source.energy.outdoor_block_reason,
                 measured_watts=source.values["ac_power"],
                 power_reported_at=power.reported_at.timestamp() if power.reported_at else None,
                 state_reported_at=changed.timestamp() if changed else None,

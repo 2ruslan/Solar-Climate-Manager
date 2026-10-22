@@ -18,6 +18,8 @@ STRATEGY_DEFAULTS = EnergyPolicyConfig().as_settings()
 
 ACTIONS = ["start", "continue", "stop", "wait"]
 REASONS = [
+    "low_outdoor_temperature",
+    "outdoor_temperature_unavailable",
     "disabled",
     "manual_pause",
     "outside_schedule",
@@ -110,6 +112,9 @@ def decide(
         if reset_energy:
             state.window.clear()
         return result("stop" if was_running else "wait", reason)
+
+    if snapshot.outdoor_block_reason:
+        return halt(snapshot.outdoor_block_reason)
 
     soc_valid = snapshot.soc is not None and isfinite(snapshot.soc) and 0 <= snapshot.soc <= 100
     if soc_valid and snapshot.soc is not None:

@@ -1,5 +1,7 @@
 """Shared schemas and validation for device and group forms."""
 
+from math import isfinite
+
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
@@ -18,9 +20,10 @@ MAIN_NUMBERS = {
     "hysteresis": (0.1, 5, 0.1, "°C"),
     **NUMERIC_SETTINGS,
 }
-SOURCE_KEYS = (set(OPTIONAL_SOURCES) - {"schedule_entity"}) | SOURCE_FLAGS
+SOURCE_KEYS = (set(OPTIONAL_SOURCES) - {"schedule_entity", "outdoor_temperature_entity"}) | SOURCE_FLAGS
 SETTINGS_SECTIONS = {
     "comfort": (
+        "outdoor_temperature_entity", "minimum_outdoor_temperature",
         "temperature_entity", "hvac_mode", "target_temperature", "hysteresis",
         "ac_min_temperature", "ac_max_temperature", "schedule_entity",
     ),
@@ -106,7 +109,7 @@ def settings_schema(values, keys):
                 else "sensor"
             )
             config = {"domain": domain}
-            if key == "temperature_entity":
+            if key in ("temperature_entity", "outdoor_temperature_entity"):
                 config["device_class"] = "temperature"
             marker = (
                 vol.Required(key)
@@ -130,6 +133,10 @@ def settings_schema(values, keys):
 
 
 def validate(hass, data):
+    threshold = data.get("minimum_outdoor_temperature", -5.0)
+    if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+            or not isfinite(threshold) or not -50 <= threshold <= 50):
+        return "invalid_outdoor_threshold"
     if type(data.get("power_learning_enabled", False)) is not bool:
         return "invalid_member_policy"
     try:
@@ -170,6 +177,11 @@ def validate(hass, data):
         if not entity_id:
             continue
         state = hass.states.get(entity_id)
+        if key == "outdoor_temperature_entity":
+            if (state is None or not entity_id.startswith("sensor.")
+                    or state.attributes.get("unit_of_measurement") not in ("°C", "°F")):
+                return "invalid_temperature"
+            continue
         domain = (
             "number"
             if key == "grid_import_limit_entity"

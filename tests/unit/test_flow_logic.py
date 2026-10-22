@@ -66,6 +66,25 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.flow.hass = self.hass
         self.flow.config_entry = self.entry
 
+    async def test_outdoor_settings_validate_save_and_clear(self):
+        self.put("sensor.outdoor", "-2", unit_of_measurement="°C")
+        result = await self.flow.async_step_comfort({
+            "outdoor_temperature_entity": "sensor.outdoor",
+            "minimum_outdoor_temperature": -7,
+        })
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(result["data"]["outdoor_temperature_entity"], "sensor.outdoor")
+        self.entry.options = result["data"]
+        result = await self.flow.async_step_comfort({"minimum_outdoor_temperature": -8})
+        self.assertIsNone(result["data"]["outdoor_temperature_entity"])
+        result = await self.flow.async_step_comfort({"minimum_outdoor_temperature": float("nan")})
+        self.assertEqual(result["errors"]["base"], "invalid_outdoor_threshold")
+        result = await self.flow.async_step_comfort({
+            "outdoor_temperature_entity": "sensor.house",
+            "minimum_outdoor_temperature": -5,
+        })
+        self.assertEqual(result["errors"]["base"], "invalid_temperature")
+
     async def new_group(self):
         self.hass.data = {}
         self.flow._registry = AsyncMock(return_value=groups.GroupRegistry())

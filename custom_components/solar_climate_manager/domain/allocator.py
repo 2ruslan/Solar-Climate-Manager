@@ -26,6 +26,7 @@ class DeviceRequest:
     last_stop: float | None = None
     state_observed_at: float | None = None
     command_confirmed_at: float | None = None
+    outdoor_block_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not self.device_id or self.operation_mode not in (
@@ -507,10 +508,11 @@ def allocate(
         elif request.running:
             if (
                 hard
+                or request.outdoor_block_reason is not None
                 or not request.temperature_valid
                 or not request.schedule_allowed
             ):
-                why = (
+                why = request.outdoor_block_reason or (
                     reason
                     if hard
                     else "invalid_temperature"
@@ -556,6 +558,8 @@ def allocate(
         why = reason
         if not request.available or request.running is None:
             why = "device_unavailable"
+        elif request.outdoor_block_reason:
+            why = request.outdoor_block_reason
         elif not request.demand:
             why = "no_temperature_demand"
         elif not request.temperature_valid or not request.schedule_allowed:

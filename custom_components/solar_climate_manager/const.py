@@ -20,6 +20,7 @@ ENERGY_SOURCES = {
     "schedule_allowed": "schedule_entity",
 }
 OPTIONAL_SOURCES = [
+    "outdoor_temperature_entity",
     *POWER_SOURCES.values(),
     *ENERGY_SOURCES.values(),
 ]
@@ -65,6 +66,7 @@ REMOVED_SETTINGS = (
 DEFAULTS = {
     **STRATEGY_DEFAULTS,
     "target_temperature": 23.0,
+    "minimum_outdoor_temperature": -5.0,
     "ac_min_temperature": 15.0,
     "ac_max_temperature": 27.0,
     "hysteresis": 1.0,

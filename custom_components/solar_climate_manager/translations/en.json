@@ -11,7 +11,12 @@
           "hysteresis": "Hysteresis (±°C)",
           "hvac_mode": "Thermostat mode",
           "ac_min_temperature": "Minimum AC command temperature (°C)",
-          "ac_max_temperature": "Maximum AC command temperature (°C)"
+          "ac_max_temperature": "Maximum AC command temperature (°C)",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "minimum_outdoor_temperature": "Minimum outdoor operating temperature (°C)"
+        },
+        "data_description": {
+          "outdoor_temperature_entity": "Optional. Below the threshold or when readings are unavailable, starts are blocked and a running AC is stopped in Control mode. Without a sensor this protection is inactive."
         }
       },
       "reconfigure": {
@@ -48,7 +53,8 @@
       "group_storage_error": "Could not load or save the group. Existing settings are preserved.",
       "already_configured": "This air conditioner already has a Solar Climate Manager entry.",
       "missing_power_meter": "Select an AC power sensor for metered accounting.",
-      "invalid_member_policy": "Check accounting mode, positive power, margin 0–100% and stabilization 30–1800 seconds."
+      "invalid_member_policy": "Check accounting mode, positive power, margin 0–100% and stabilization 30–1800 seconds.",
+      "invalid_outdoor_threshold": "Enter a threshold from −50 to 50 °C."
     },
     "abort": {
       "already_configured": "This climate entity is already configured.",
@@ -73,7 +79,12 @@
               "hysteresis": "Hysteresis (±°C)",
               "ac_min_temperature": "Minimum AC command temperature (°C)",
               "ac_max_temperature": "Maximum AC command temperature (°C)",
-              "schedule_entity": "Allowed operation schedule"
+              "schedule_entity": "Allowed operation schedule",
+              "outdoor_temperature_entity": "Outdoor temperature sensor",
+              "minimum_outdoor_temperature": "Minimum outdoor operating temperature (°C)"
+            },
+            "data_description": {
+              "outdoor_temperature_entity": "Optional. Below the threshold or when readings are unavailable, starts are blocked and a running AC is stopped in Control mode. Without a sensor this protection is inactive."
             }
           },
           "grid": {
@@ -146,9 +157,14 @@
           "hvac_mode": "Thermostat mode",
           "schedule_entity": "Allowed schedule helper (optional)",
           "ac_min_temperature": "Minimum AC command temperature (°C)",
-          "ac_max_temperature": "Maximum AC command temperature (°C)"
+          "ac_max_temperature": "Maximum AC command temperature (°C)",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "minimum_outdoor_temperature": "Minimum outdoor operating temperature (°C)"
         },
-        "description": "The target is for the room. The AC target compensates for the difference between its current_temperature and the room sensor. Other settings are preserved."
+        "description": "The target is for the room. The AC target compensates for the difference between its current_temperature and the room sensor. Other settings are preserved.",
+        "data_description": {
+          "outdoor_temperature_entity": "Optional. Below the threshold or when readings are unavailable, starts are blocked and a running AC is stopped in Control mode. Without a sensor this protection is inactive."
+        }
       },
       "energy": {
         "title": "Energy",
@@ -296,7 +312,8 @@
       "group_storage_error": "Could not load or save the group. Existing settings are preserved.",
       "already_configured": "This air conditioner already has a Solar Climate Manager entry.",
       "missing_power_meter": "Select an AC power sensor for metered accounting.",
-      "invalid_member_policy": "Check accounting mode, positive power, margin 0–100% and stabilization 30–1800 seconds."
+      "invalid_member_policy": "Check accounting mode, positive power, margin 0–100% and stabilization 30–1800 seconds.",
+      "invalid_outdoor_threshold": "Enter a threshold from −50 to 50 °C."
     },
     "abort": {
       "group_store_unavailable": "Group storage is unavailable. Restore it and reload the integration.",
@@ -436,7 +453,9 @@
           "grid_import_limit": "Grid import limit exceeded or insufficient start headroom",
           "grid_limit_unavailable": "Inverter import limit unavailable or invalid",
           "grid_power_unavailable": "Grid power measurement unavailable or stale",
-          "soc_recovery": "Waiting for charge recovery"
+          "soc_recovery": "Waiting for charge recovery",
+          "low_outdoor_temperature": "Outdoor temperature below minimum",
+          "outdoor_temperature_unavailable": "Outdoor temperature unavailable"
         }
       },
       "manual_status": {
@@ -487,7 +506,9 @@
           "grid_import_limit": "Grid import limit exceeded or insufficient start headroom",
           "grid_limit_unavailable": "Inverter import limit unavailable or invalid",
           "grid_power_unavailable": "Grid power measurement unavailable or stale",
-          "soc_recovery": "Waiting for charge recovery"
+          "soc_recovery": "Waiting for charge recovery",
+          "low_outdoor_temperature": "Outdoor temperature below minimum",
+          "outdoor_temperature_unavailable": "Outdoor temperature unavailable"
         }
       },
       "command_error": {
@@ -584,7 +605,9 @@
           "temporary_block": "Temporary block",
           "awaiting_previous_start": "Awaiting previous start",
           "higher_priority": "Higher priority",
-          "recovering_command": "Recovering command"
+          "recovering_command": "Recovering command",
+          "low_outdoor_temperature": "Outdoor temperature below minimum",
+          "outdoor_temperature_unavailable": "Outdoor temperature unavailable"
         }
       },
       "group_command_status": {

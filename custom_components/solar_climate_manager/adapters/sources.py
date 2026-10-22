@@ -52,6 +52,17 @@ def read_sources(
         if state
         else None
     )
+    outdoor_state = raw["outdoor_temperature_entity"]
+    outdoor = (
+        temperature_celsius(outdoor_state.state, outdoor_state.attributes.get("unit_of_measurement"))
+        if outdoor_state else None
+    )
+    outdoor_block = None
+    if settings.get("outdoor_temperature_entity"):
+        if outdoor is None:
+            outdoor_block = "outdoor_temperature_unavailable"
+        elif outdoor < settings.get("minimum_outdoor_temperature", -5.0):
+            outdoor_block = "low_outdoor_temperature"
     measured_temperature = temperature
     if temperature is None:
         temperature = last_temperature
@@ -82,7 +93,7 @@ def read_sources(
             ac_target = temperature_celsius(command_target, temperature_unit)
         except ValueError:
             pass
-    data = {}
+    data = {"outdoor_temperature": outdoor}
     for key, source_key in POWER_SOURCES.items():
         source = raw[source_key]
         data[key] = (
@@ -148,6 +159,7 @@ def read_sources(
         ac_power_valid=ac_valid,
         temperature_valid=temperature is not None and climate_valid and ac_target is not None,
         schedule_allowed=schedule is True,
+        outdoor_block_reason=outdoor_block,
     )
 
     climate_available = climate is not None and climate.state not in ("unknown", "unavailable")
@@ -160,6 +172,7 @@ def read_sources(
     )
     normalized = {
         "temperature_entity": measured_temperature,
+        "outdoor_temperature_entity": outdoor,
         "climate_entity": climate.state if climate_available else None,
         "grid_available_entity": grid,
         "schedule_entity": schedule,

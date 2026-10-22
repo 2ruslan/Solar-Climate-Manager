@@ -367,6 +367,19 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.coordinator.data["running"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
 
+    async def test_outdoor_guard_sends_stop_in_control_mode(self):
+        self.coordinator.settings["outdoor_temperature_entity"] = "sensor.outdoor"
+        self.put("sensor.outdoor", "0", unit_of_measurement="°C")
+        await self.control_mode()
+        self.own_update()
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        self.put("sensor.outdoor", "-6", unit_of_measurement="°C")
+        self.coordinator._evaluate()
+        await self.coordinator.commands.task
+        self.assertEqual(self.coordinator.data["strategy_reason"], "low_outdoor_temperature")
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+
     async def test_low_soc_stops_actual_climate(self):
         await self.control_mode()
         self.own_update()

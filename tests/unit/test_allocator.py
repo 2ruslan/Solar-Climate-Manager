@@ -39,6 +39,23 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual(retained.reservations, state.reservations)
         self.assertEqual(pending, 900)
 
+    def test_outdoor_guard_is_individual_and_overrides_minimum_run(self):
+        for reason in ("low_outdoor_temperature", "outdoor_temperature_unavailable"):
+            for running in (True, False):
+                with self.subTest(reason=reason, running=running):
+                    blocked = replace(self.requests[0], running=running,
+                                      last_start=999, outdoor_block_reason=reason)
+                    result = self.run_allocation(
+                        energy=replace(self.energy, grid=True, load=1500),
+                        requests=(blocked, self.requests[1]),
+                    )
+                    actions = self.actions(result)
+                    self.assertEqual(actions["a"], ("stop" if running else "wait", reason))
+                    self.assertEqual(
+                        actions["b"],
+                        ("wait", "telemetry_unsettled") if running else ("start", "grid_ready"),
+                    )
+
     def test_two_900w_requests_share_1000w_atomically(self):
         result = self.run_allocation()
         self.assertEqual(

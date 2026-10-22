@@ -265,6 +265,7 @@ class GroupManager:
                 own.phase == "uncertain"
                 or own.command_id not in self.issued
                 or not request.demand
+                or request.outdoor_block_reason is not None
                 or not request.schedule_allowed
                 or not request.temperature_valid
                 or result.reason not in ("solar_ready", "grid_ready")

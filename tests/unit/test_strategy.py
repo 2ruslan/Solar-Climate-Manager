@@ -50,6 +50,18 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(0).action, "start")
         self.assertEqual(self.decide(60).action, "continue")
 
+    def test_outdoor_guard_stops_immediately_and_blocks_restart(self):
+        for reason in ("low_outdoor_temperature", "outdoor_temperature_unavailable"):
+            with self.subTest(reason=reason):
+                self.observed = policy.ObservedDeviceState(running=True, last_start=99)
+                blocked = replace(self.snapshot, grid=True, outdoor_block_reason=reason)
+                decision = self.decide(100, snapshot=blocked)
+                self.assertEqual((decision.action, decision.reason), ("stop", reason))
+                self.assertEqual(self.decide(101, snapshot=blocked).action, "wait")
+                recovered = replace(blocked, outdoor_block_reason=None)
+                self.assertEqual(self.decide(102, snapshot=recovered).reason, "minimum_off")
+                self.assertEqual(self.decide(221, snapshot=recovered).action, "start")
+
     def test_grid_heats_at_night_without_forecast_or_pv(self):
         grid = replace(
             self.snapshot,

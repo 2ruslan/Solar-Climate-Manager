@@ -63,6 +63,7 @@ class EnergySnapshot:
     ac_power_valid: bool = True
     temperature_valid: bool = True
     schedule_allowed: bool = True
+    outdoor_block_reason: str | None = None
 
 
 @dataclass(frozen=True)

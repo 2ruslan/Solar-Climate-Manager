@@ -51,6 +51,26 @@ class SourceTests(unittest.TestCase):
             models.DeviceConfig.from_settings(self.settings), unit, self.now,
         )
 
+    def test_outdoor_temperature_threshold_units_and_unavailable(self):
+        self.assertIsNone(self.capture().energy.outdoor_block_reason)
+        self.settings["outdoor_temperature_entity"] = "sensor.outdoor"
+        for value, unit, reason in (
+            ("-5.1", "°C", "low_outdoor_temperature"),
+            ("-5", "°C", None), ("23", "°F", None),
+            ("22", "°F", "low_outdoor_temperature"),
+            ("unavailable", "°C", "outdoor_temperature_unavailable"),
+            ("nan", "°C", "outdoor_temperature_unavailable"),
+            ("10", "K", "outdoor_temperature_unavailable"),
+        ):
+            with self.subTest(value=value, unit=unit):
+                self.put("sensor.outdoor", value, unit_of_measurement=unit)
+                self.assertEqual(self.capture().energy.outdoor_block_reason, reason)
+        del self.states["sensor.outdoor"]
+        self.assertEqual(self.capture().energy.outdoor_block_reason,
+                         "outdoor_temperature_unavailable")
+        self.settings["outdoor_temperature_entity"] = None
+        self.assertIsNone(self.capture().energy.outdoor_block_reason)
+
     def test_shared_sources_read_once_and_snapshot_is_detached(self):
         get_state = Mock(side_effect=self.states.get)
         snapshot = self.capture(get_state)
