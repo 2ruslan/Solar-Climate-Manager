@@ -141,6 +141,7 @@ class CommandState:
     """In-flight command bookkeeping; it does not establish a physical cycle."""
 
     attempt: CommandAttempt | None = None
+    fan_attempt: CommandAttempt | None = None
     contexts: dict[str, float] = field(default_factory=dict)
     expected_updates: list[ExpectedUpdate] = field(default_factory=list)
     unconfirmed_start: bool = False

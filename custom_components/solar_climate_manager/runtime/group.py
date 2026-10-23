@@ -131,7 +131,7 @@ class GroupManager:
         registry = self.repository.registry
         return bool(registry and any(r.device_id == device_id for r in registry.unresolved))
 
-    @callback
+    @callback  # type: ignore[untyped-decorator]  # HA is absent from the dev type-check environment.
     def _changed(self, event: Any) -> None:
         self.request_evaluation()
 
@@ -421,7 +421,7 @@ class GroupManager:
             return False
         if pause_active(coordinator.runtime.manual_date, dt_util.now().date()):
             return False
-        if (service == "set_temperature") != desired:
+        if (service in ("set_temperature", "set_fan_mode")) != desired:
             return False
         # Rebuild the command with current target/temperature/device state, never
         # accept a payload built before an awaited storage write changed the world.
@@ -557,6 +557,8 @@ class GroupManager:
                 # The write-ahead timestamp predates awaited I/O. Only reports
                 # after actual dispatch can prove off; reload requires a new stop.
                 self.stop_times[device_id] = dt_util.utcnow().timestamp()
+            if service == "set_fan_mode":
+                return DispatchTicket(group_id, device_id, None, service)
             if own and own.command_id:
                 self.issued.add(own.command_id)
             if inserted is not None:

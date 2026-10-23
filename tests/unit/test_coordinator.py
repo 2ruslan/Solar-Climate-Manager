@@ -380,6 +380,82 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["strategy_reason"], "low_outdoor_temperature")
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
+    async def test_start_then_auto_fan_preserves_start_acknowledgement(self):
+        self.states["climate.ac"].attributes.update(fan_modes=["auto", "low"], fan_mode="low")
+        await self.control_mode()
+        self.assertEqual(self.hass.services.async_call.call_args.args[1], "set_temperature")
+        self.own_update()
+        self.states["climate.ac"].attributes.update(fan_modes=["auto", "low"], fan_mode="low")
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        start = self.coordinator.commands.state.attempt
+        self.assertEqual(self.hass.services.async_call.call_args.args[1], "set_fan_mode")
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["fan_mode"], "auto")
+        old = self.states["climate.ac"]
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=23,
+                 fan_modes=["auto", "low"], fan_mode="auto")
+        self.coordinator._state_changed(SimpleNamespace(data={
+            "entity_id": "climate.ac", "old_state": old, "new_state": self.states["climate.ac"],
+        }))
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        self.assertEqual(self.coordinator.settings["operation_mode"], "control")
+        self.assertIs(self.coordinator.commands.state.attempt, start)
+        self.assertIsNotNone(start.confirmed_at)
+        self.assertIsNotNone(self.coordinator.commands.state.fan_attempt.confirmed_at)
+        self.assertEqual(self.hass.services.async_call.await_count, 2)
+
+    async def test_auto_fan_before_temperature_change_and_stop_has_priority(self):
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=15,
+                 fan_modes=["Auto", "low"], fan_mode="low")
+        async def apply(domain, service, payload, **kwargs):
+            self.states["climate.ac"].attributes.update({
+                key: value for key, value in payload.items()
+                if key not in ("entity_id", "hvac_mode")
+            })
+        self.hass.services.async_call.side_effect = apply
+        await self.control_mode()
+        self.assertEqual(
+            [call.args[1] for call in self.hass.services.async_call.call_args_list],
+            ["set_fan_mode", "set_temperature"],
+        )
+        self.assertEqual(self.states["climate.ac"].attributes["fan_mode"], "Auto")
+        self.states["climate.ac"].attributes["fan_mode"] = "low"
+        self.coordinator.settings["outdoor_temperature_entity"] = "sensor.missing"
+        self.coordinator._evaluate()
+        await self.coordinator.commands.task
+        self.assertEqual(self.hass.services.async_call.call_args.args[1], "set_hvac_mode")
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
+
+    async def test_group_fan_authorization_requires_current_running_intent(self):
+        group_module = importlib.import_module("scm_adapter_test.runtime.group")
+        self.hass.data = {}
+        manager = group_module.GroupManager(self.hass)
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=23,
+                 fan_modes=["auto", "low"], fan_mode="low")
+        await self.control_mode()
+        matches = manager._command_matches
+        payload = {"fan_mode": "auto"}
+        self.assertTrue(matches(self.coordinator, True, "set_fan_mode", payload))
+        self.assertFalse(matches(self.coordinator, False, "set_fan_mode", payload))
+        self.assertFalse(matches(self.coordinator, None, "set_fan_mode", payload))
+        self.assertFalse(matches(self.coordinator, True, "set_fan_mode", {"fan_mode": "low"}))
+        self.states["climate.ac"].state = "off"
+        self.assertFalse(matches(self.coordinator, True, "set_fan_mode", payload))
+
+    async def test_auto_fan_no_redundant_or_unsupported_commands(self):
+        for modes, current, features in (
+            (["auto", "low"], "auto", 9),
+            (["low", "high"], "low", 9),
+            (["auto", "low"], "low", 1),
+            (None, "low", 9),
+        ):
+            with self.subTest(modes=modes, current=current, features=features):
+                self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=23,
+                         fan_modes=modes, fan_mode=current, supported_features=features)
+                await self.control_mode()
+                self.hass.services.async_call.assert_not_called()
+
     async def test_low_soc_stops_actual_climate(self):
         await self.control_mode()
         self.own_update()

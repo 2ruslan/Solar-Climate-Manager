@@ -61,7 +61,10 @@ class CommandExecutor:
 
     def observe(self, climate):
         """Confirm only a new device report, including all commanded fields."""
-        attempt = self.state.attempt
+        for attempt in (self.state.attempt, self.state.fan_attempt):
+            self._observe_attempt(attempt, climate)
+
+    def _observe_attempt(self, attempt, climate):
         if attempt is None or attempt.confirmed_at is not None or climate is None:
             return
         reported = getattr(climate, "last_reported", None)
@@ -71,7 +74,10 @@ class CommandExecutor:
             if name == "hvac_mode":
                 if climate.state != value:
                     return
-            elif not temperature_matches(climate.attributes.get(name), value):
+            elif name == "temperature":
+                if not temperature_matches(climate.attributes.get(name), value):
+                    return
+            elif climate.attributes.get(name) != value:
                 return
         attempt.confirmed_at = reported.timestamp()
 
@@ -112,6 +118,18 @@ class CommandExecutor:
     def _control_command(self, climate, data=None):
         data = self.get_data() if data is None else data
         if self.runtime.intent.running:
+            # Set fan speed only on a confirmed running device; never start an
+            # off unit through a vendor-specific fan service before authorization.
+            auto = next(
+                (mode for mode in (climate.attributes.get("fan_modes") or [])
+                 if isinstance(mode, str) and mode.casefold() == "auto"),
+                None,
+            )
+            features = climate.attributes.get("supported_features")
+            if (climate.state == self.runtime.device.hvac_mode and auto is not None
+                    and (features is None or features & 8)  # FAN_MODE
+                    and climate.attributes.get("fan_mode") != auto):
+                return "set_fan_mode", {"fan_mode": auto}
             try:
                 normalized_target(
                     self.runtime.device.target_temperature,
@@ -235,7 +253,12 @@ class CommandExecutor:
                 }
                 self.state.expected_updates.append(ExpectedUpdate(expires, remaining))
                 attempt = CommandAttempt(service, dict(payload), now)
-                self.state.attempt = attempt
+                if service == "set_fan_mode":
+                    # Fan acknowledgement must not replace a pending start/stop
+                    # acknowledgement used by group accounting and learning.
+                    self.state.fan_attempt = attempt
+                else:
+                    self.state.attempt = attempt
                 self.state.last_command = (key, now)
                 if service == "set_temperature":
                     self.state.last_target_update = now
