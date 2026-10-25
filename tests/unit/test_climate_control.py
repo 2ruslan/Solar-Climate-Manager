@@ -13,6 +13,24 @@ control = importlib.import_module("scm_climate_control_test.climate_control")
 
 
 class ClimateControlTests(unittest.TestCase):
+    def test_fan_speed_uses_absolute_room_error_and_exact_boundary(self):
+        attrs = {"fan_modes": ["Auto", "low", "High"]}
+        for current, expected in ((20, "High"), (21.99, "High"), (22, "Auto"),
+                                  (23, "Auto"), (24, "Auto"), (24.01, "High")):
+            with self.subTest(current=current):
+                self.assertEqual(control.desired_fan_mode(23, current, attrs), expected)
+        for current in (None, float("nan"), float("inf")):
+            self.assertIsNone(control.desired_fan_mode(23, current, attrs))
+
+    def test_fan_speed_selects_supported_maximum_or_auto_fallback(self):
+        for modes, expected in ((["auto", "high", "max"], "max"),
+                                (["auto", "high", "turbo"], "turbo"),
+                                (["auto", "1", "5", "3"], "5"),
+                                (["auto", "low"], "auto"),
+                                (["unknown"], None), (None, None)):
+            with self.subTest(modes=modes):
+                self.assertEqual(control.desired_fan_mode(23, 20, {"fan_modes": modes}), expected)
+
     def test_compensation_refresh_uses_remaining_device_reserve(self):
         for mode, target, ample, boundary, small, crossed in (
             ("heat", 26, 24, 24.9, 25, 27),

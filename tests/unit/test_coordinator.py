@@ -380,6 +380,25 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["strategy_reason"], "low_outdoor_temperature")
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["hvac_mode"], "off")
 
+    async def test_fan_switches_from_high_to_auto_at_one_degree(self):
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=23,
+                 fan_modes=["auto", "low", "high"], fan_mode="auto")
+        await self.control_mode()
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["fan_mode"], "high")
+        old = self.states["climate.ac"]
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=23,
+                 fan_modes=["auto", "low", "high"], fan_mode="high")
+        self.coordinator._state_changed(SimpleNamespace(data={
+            "entity_id": "climate.ac", "old_state": old, "new_state": self.states["climate.ac"],
+        }))
+        if self.coordinator.commands.task:
+            await self.coordinator.commands.task
+        self.put("sensor.room", "22", unit_of_measurement="°C")
+        self.coordinator._evaluate()
+        await self.coordinator.commands.task
+        self.assertEqual(self.hass.services.async_call.call_args.args[2]["fan_mode"], "auto")
+        self.assertEqual(self.coordinator.settings["operation_mode"], "control")
+
     async def test_start_then_auto_fan_preserves_start_acknowledgement(self):
         self.states["climate.ac"].attributes.update(fan_modes=["auto", "low"], fan_mode="low")
         await self.control_mode()
@@ -444,6 +463,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(matches(self.coordinator, True, "set_fan_mode", payload))
 
     async def test_auto_fan_no_redundant_or_unsupported_commands(self):
+        self.put("sensor.room", "22", unit_of_measurement="°C")
         for modes, current, features in (
             (["auto", "low"], "auto", 9),
             (["low", "high"], "low", 9),

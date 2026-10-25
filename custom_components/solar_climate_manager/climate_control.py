@@ -25,6 +25,28 @@ def temperature_matches(actual, target):
     return value is not None and isclose(value, target, abs_tol=0.05, rel_tol=0)
 
 
+def desired_fan_mode(target_c, current_c, attributes):
+    """Use the room error in Celsius, independent of the compensated AC target."""
+    target, current = number(target_c), number(current_c)
+    if target is None or current is None:
+        return None
+    modes = {
+        mode.casefold(): mode for mode in (attributes.get("fan_modes") or [])
+        if isinstance(mode, str)
+    }
+    difference = abs(target - current)
+    if difference > 1 and not isclose(difference, 1, abs_tol=1e-9, rel_tol=0):
+        for name in ("max", "turbo", "strong", "high"):
+            if name in modes:
+                return modes[name]
+        # Some integrations expose numbered speed levels rather than names.
+        levels = [name for name in modes if name.isascii() and name.isdecimal()]
+        if levels:
+            return modes[max(levels, key=int)]
+    # Unknown maximum-speed names must never produce an unsupported command.
+    return modes.get("auto")
+
+
 def compensation_needed(set_temperature, ac_temperature, mode):
     """Refresh only when the device's remaining heating/cooling reserve is small."""
     target, current = number(set_temperature), number(ac_temperature)

@@ -15,6 +15,7 @@ from ..climate_control import (
     acknowledgement_changes,
     compensated_target,
     compensation_needed,
+    desired_fan_mode,
     matches_acknowledgement,
     normalized_target,
     temperature_matches,
@@ -120,16 +121,14 @@ class CommandExecutor:
         if self.runtime.intent.running:
             # Set fan speed only on a confirmed running device; never start an
             # off unit through a vendor-specific fan service before authorization.
-            auto = next(
-                (mode for mode in (climate.attributes.get("fan_modes") or [])
-                 if isinstance(mode, str) and mode.casefold() == "auto"),
-                None,
+            fan_mode = desired_fan_mode(
+                self.runtime.device.target_temperature, data["temperature"], climate.attributes,
             )
             features = climate.attributes.get("supported_features")
-            if (climate.state == self.runtime.device.hvac_mode and auto is not None
+            if (climate.state == self.runtime.device.hvac_mode and fan_mode is not None
                     and (features is None or features & 8)  # FAN_MODE
-                    and climate.attributes.get("fan_mode") != auto):
-                return "set_fan_mode", {"fan_mode": auto}
+                    and climate.attributes.get("fan_mode") != fan_mode):
+                return "set_fan_mode", {"fan_mode": fan_mode}
             try:
                 normalized_target(
                     self.runtime.device.target_temperature,
