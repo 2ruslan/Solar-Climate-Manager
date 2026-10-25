@@ -51,6 +51,18 @@ class SourceTests(unittest.TestCase):
             models.DeviceConfig.from_settings(self.settings), unit, self.now,
         )
 
+    def test_optional_generation_forecast_power_units_and_invalid_values(self):
+        self.assertIsNone(self.capture().energy.generation_forecast)
+        self.settings["generation_forecast_entity"] = "sensor.forecast"
+        for value, unit, expected in (
+            ("3.8", "kW", 3800), ("3800", "W", 3800),
+            ("3.8", "kWh", None), ("unavailable", "W", None),
+            ("-1", "W", None), ("nan", "W", None),
+        ):
+            with self.subTest(value=value, unit=unit):
+                self.put("sensor.forecast", value, unit_of_measurement=unit)
+                self.assertEqual(self.capture().energy.generation_forecast, expected)
+
     def test_outdoor_temperature_threshold_units_and_unavailable(self):
         self.assertIsNone(self.capture().energy.outdoor_block_reason)
         self.settings["outdoor_temperature_entity"] = "sensor.outdoor"

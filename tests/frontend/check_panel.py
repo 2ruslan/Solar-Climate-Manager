@@ -117,6 +117,12 @@ def main():
             assert saved["grid"]["grid_positive"] == "export"
             assert set(saved) == {"comfort", "grid", "battery", "solar", "consumption", "settings_action"}
             expect(page.locator('[name="grid_positive"]')).to_have_count(0)
+            page.locator(".device").last.locator("summary").filter(has_text="Сонячна генерація").click()
+            page.locator('[name="generation_forecast_entity"]').fill("sensor.forecast")
+            page.get_by_role("button", name="Зберегти", exact=True).click()
+            expect(page.locator('[name="generation_forecast_entity"]')).to_have_count(0)
+            saved = page.evaluate("calls.at(-1)[2]")
+            assert saved["solar"]["generation_forecast_entity"] == "sensor.forecast"
             page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Батарея").click()
             page.locator('[name="minimum_soc"]').fill("70")
             page.get_by_role("button", name="Зберегти", exact=True).click()

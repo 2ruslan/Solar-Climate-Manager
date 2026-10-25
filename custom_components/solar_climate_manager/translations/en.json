@@ -111,6 +111,7 @@
           "solar": {
             "name": "Solar generation",
             "data": {
+              "generation_forecast_entity": "Generation forecast now (optional power sensor)",
               "pv_power_entity": "Actual PV power sensor"
             }
           },
@@ -132,6 +133,7 @@
       "sources": {
         "title": "Data sources",
         "data": {
+          "generation_forecast_entity": "Generation forecast now (optional power sensor)",
           "pv_power_entity": "Actual PV power sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
@@ -238,6 +240,7 @@
       "group_sources": {
         "title": "Shared sources",
         "data": {
+          "generation_forecast_entity": "Generation forecast now (optional power sensor)",
           "pv_power_entity": "Actual PV power sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",
@@ -269,6 +272,7 @@
       "group_settings": {
         "title": "Shared settings",
         "data": {
+          "generation_forecast_entity": "Generation forecast now (optional power sensor)",
           "pv_power_entity": "Actual PV power sensor",
           "load_power_entity": "Total consumption power sensor",
           "soc_entity": "Battery SOC sensor (%)",

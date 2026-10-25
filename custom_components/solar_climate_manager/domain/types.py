@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields, replace
+from math import isfinite
 from typing import Any, Literal
 
 from ..window import BudgetWindow
@@ -64,6 +65,19 @@ class EnergySnapshot:
     temperature_valid: bool = True
     schedule_allowed: bool = True
     outdoor_block_reason: str | None = None
+    generation_forecast: float | None = None
+
+    @property
+    def forecast_delta(self) -> float:
+        """Optional current power forecast adds only positive, valid headroom."""
+        actual, forecast = self.pv, self.generation_forecast
+        if any(
+            value is None or isinstance(value, bool) or not isfinite(value) or value < 0
+            for value in (actual, forecast)
+        ):
+            return 0.0
+        assert actual is not None and forecast is not None
+        return max(0.0, forecast - actual)
 
 
 @dataclass(frozen=True)

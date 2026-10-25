@@ -8,6 +8,7 @@ from .strategy import STRATEGY_DEFAULTS
 DOMAIN = "solar_climate_manager"
 POWER_SOURCES = {
     "pv_power": "pv_power_entity",
+    "generation_forecast": "generation_forecast_entity",
 }
 ENERGY_SOURCES = {
     "load_power": "load_power_entity",

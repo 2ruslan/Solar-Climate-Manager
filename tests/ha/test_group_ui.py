@@ -57,6 +57,31 @@ async def test_shared_settings_save_sources_and_policy_together(hass):
     assert after.sources.load_power_entity == before.sources.load_power_entity
 
 
+async def test_shared_forecast_changes_budget_and_can_be_removed(hass):
+    first, second, repository, group_id = await setup_shadow_group(hass)
+    hass.states.async_set("sensor.forecast", "2.0", {"unit_of_measurement": "kW"})
+    before = repository.registry.group(group_id)
+    form = await group_form(hass, first, "group_settings")
+    values = {key: value for key, value in
+              {**asdict(before.sources), **asdict(before.policy)}.items() if value is not None}
+    values["generation_forecast_entity"] = "sensor.forecast"
+    result = await submit(hass, form, values)
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert repository.registry.group(group_id).sources.generation_forecast_entity == "sensor.forecast"
+    for device in (first, second):
+        assert device.runtime_data.data["group_available_power"] == 1400
+    hass.states.async_set("sensor.forecast", "unavailable", {"unit_of_measurement": "kW"})
+    await hass.async_block_till_done()
+    assert first.runtime_data.data["group_available_power"] == 1000
+    form = await group_form(hass, first, "group_settings")
+    values.pop("generation_forecast_entity")
+    result = await submit(hass, form, values)
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert repository.registry.group(group_id).sources.generation_forecast_entity is None
+
+
 async def test_shared_settings_reject_stale_form_and_invalid_thresholds(hass):
     first, _, repository, group_id = await setup_shadow_group(hass)
     before = repository.registry.group(group_id)

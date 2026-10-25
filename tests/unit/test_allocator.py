@@ -25,6 +25,25 @@ class AllocatorTests(unittest.TestCase):
     def actions(self, result):
         return {d.device_id: (d.action, d.reason) for d in result.decisions}
 
+    def test_forecast_delta_is_shared_once_and_does_not_increase_grid_limit(self):
+        for forecast, available in (
+            (2000, 500), (1600, 100), (1000, 100), (None, 100),
+            (float("nan"), 100), (float("inf"), 100), (-1, 100),
+        ):
+            with self.subTest(forecast=forecast):
+                result = self.run_allocation(
+                    energy=replace(self.energy, generation_forecast=forecast))
+                self.assertEqual(result.available_watts, available)
+                self.assertEqual(self.actions(result)["b"], ("wait", "insufficient_budget"))
+        result = self.run_allocation(energy=replace(
+            self.energy, grid=True, grid_limit_configured=True,
+            grid_import_limit=1000, grid_power=0, generation_forecast=5000),
+            grid_reported_at=1000)
+        self.assertEqual(result.available_watts, 100)
+        result = self.run_allocation(energy=replace(
+            self.energy, pv=None, generation_forecast=5000))
+        self.assertIsNone(result.available_watts)
+
     def test_fresh_identical_off_report_confirms_stop_without_state_change(self):
         request = replace(self.requests[0], measured_watts=0, power_reported_at=1001,
                           state_reported_at=900, state_observed_at=1001)

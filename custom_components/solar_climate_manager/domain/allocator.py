@@ -478,7 +478,7 @@ def allocate(
                     budget = sum(r.policy.planned_watts for r in snapshot.requests) - pending
             elif _valid(energy.pv):
                 assert energy.pv is not None
-                budget = energy.pv - total - pending
+                budget = energy.pv + energy.forecast_delta - total - pending
             else:
                 reason, hard = "invalid_solar_data", True
     if budget is not None and budget < 0:

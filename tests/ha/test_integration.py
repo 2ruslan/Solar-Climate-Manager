@@ -196,6 +196,29 @@ async def test_reload_removes_retired_forecast_entities(hass):
     assert registry.async_get(temperature) is not None
 
 
+async def test_optional_generation_forecast_options_reload_and_live_updates(hass):
+    entry = await setup(hass)
+    hass.states.async_set("sensor.forecast", "3.8", {"unit_of_measurement": "kW"})
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], grouped_input(entry, generation_forecast_entity="sensor.forecast"))
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["generation_forecast"] == 3800
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["generation_forecast"] == 3800
+    hass.states.async_set("sensor.forecast", "unavailable", {"unit_of_measurement": "kW"})
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["generation_forecast"] is None
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], grouped_input(entry, generation_forecast_entity=None))
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert entry.runtime_data.settings["generation_forecast_entity"] is None
+
+
 async def test_reject_energy_sensor_as_solar_power(hass):
     states(hass)
     hass.states.async_set("sensor.energy", "5", {"unit_of_measurement": "kWh"})

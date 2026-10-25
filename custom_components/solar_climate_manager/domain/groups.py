@@ -8,6 +8,7 @@ from uuid import uuid4
 GROUP_SCHEMA_VERSION = 2
 SHARED_SOURCE_KEYS = (
     "pv_power_entity",
+    "generation_forecast_entity",
     "load_power_entity",
     "soc_entity",
     "battery_power_entity",
@@ -26,6 +27,7 @@ def identifier(value: str) -> str:
 @dataclass(frozen=True)
 class GroupSources:
     pv_power_entity: str | None = None
+    generation_forecast_entity: str | None = None
     load_power_entity: str | None = None
     soc_entity: str | None = None
     battery_power_entity: str | None = None

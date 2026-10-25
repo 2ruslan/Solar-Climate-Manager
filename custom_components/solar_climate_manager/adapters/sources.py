@@ -148,6 +148,7 @@ def read_sources(
     ] is not None
     snapshot = EnergySnapshot(
         pv=data["pv_power"],
+        generation_forecast=data["generation_forecast"],
         load=data["load_power"],
         soc=data["soc"],
         battery=data["battery_power"],

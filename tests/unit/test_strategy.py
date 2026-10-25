@@ -50,6 +50,19 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(0).action, "start")
         self.assertEqual(self.decide(60).action, "continue")
 
+    def test_forecast_adds_only_positive_delta_to_solar_budget(self):
+        for forecast, action in (
+            (2000, "start"), (1000, "wait"), (500, "wait"),
+            (None, "wait"), (float("nan"), "wait"), (float("inf"), "wait"),
+        ):
+            with self.subTest(forecast=forecast):
+                self.setUp()
+                snapshot = replace(self.snapshot, pv=1000, generation_forecast=forecast)
+                self.assertEqual(self.decide(snapshot=snapshot).action, action)
+        self.setUp()
+        snapshot = replace(self.snapshot, pv=None, generation_forecast=5000)
+        self.assertEqual(self.decide(snapshot=snapshot).reason, "invalid_energy_data")
+
     def test_outdoor_guard_stops_immediately_and_blocks_restart(self):
         for reason in ("low_outdoor_temperature", "outdoor_temperature_unavailable"):
             with self.subTest(reason=reason):

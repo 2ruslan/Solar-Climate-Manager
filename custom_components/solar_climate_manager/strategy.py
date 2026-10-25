@@ -175,7 +175,7 @@ def decide(
     if solar_valid and snapshot.pv is not None and house_load is not None:
         base = max(0, house_load - snapshot.actual_ac_power) if cfg.load_includes_ac else house_load
         required = base + cfg.estimated_ac_power
-        solar_margin = round(snapshot.pv - required, 1)
+        solar_margin = round(snapshot.pv + snapshot.forecast_delta - required, 1)
         # Decisions use the current budget without a stabilization window.
         state.window.clear()
     else:
