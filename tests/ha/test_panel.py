@@ -207,6 +207,9 @@ async def test_history_is_admin_only_read_only_and_handles_unload(
     first = await setup(hass)
     client = await hass_ws_client(hass)
     request = {"type": f"{DOMAIN}/history", "entry_id": first.entry_id}
+    climate = hass.states.get(first.runtime_data.settings["climate_entity"])
+    hass.states.async_set(climate.entity_id, climate.state, {**climate.attributes, "temperature": 18})
+    await hass.async_block_till_done()
     with patch.object(type(hass.services), "async_call") as calls:
         await client.send_json_auto_id(request)
         response = await client.receive_json()
@@ -216,6 +219,10 @@ async def test_history_is_admin_only_read_only_and_handles_unload(
         assert result["rows"]
         assert "temperature" in result["rows"][-1]["state"]
         assert result["max_rows"] == 3000
+        assert result["sample_interval_seconds"] == 60
+        external = [row for row in result["rows"] if row.get("event", {}).get("type") == "external_change"]
+        assert external[-1]["event"]["changes"]["temperature"]["after"] == 18
+        assert external[-1]["state"]["automation_mode"] == "temporary_block"
         calls.assert_not_called()
     readonly = await hass_ws_client(hass, access_token=hass_read_only_access_token)
     await readonly.send_json_auto_id(request)

@@ -24,9 +24,30 @@ class HistoryTests(unittest.TestCase):
     def test_bounded_and_expired(self):
         log = history.DiagnosticHistory()
         for timestamp in range(history.MAX_ROWS + 20):
-            log.record(timestamp, {"temperature": timestamp}, {})
-        self.assertEqual(len(log.read(history.MAX_ROWS + 20)), history.MAX_ROWS)
+            log.record(timestamp, {"temperature": timestamp, "running": bool(timestamp % 2)}, {})
+        self.assertLessEqual(len(log.read(history.MAX_ROWS + 20)), history.MAX_ROWS)
+        self.assertIsNotNone(log.events_dropped_through)
         self.assertEqual(log.read(history.MAX_AGE + history.MAX_ROWS + 20), [])
+
+    def test_fast_telemetry_cannot_evict_twelve_hours_of_samples(self):
+        log = history.DiagnosticHistory()
+        for timestamp in range(12 * 3600 + 1):
+            log.record(timestamp, {"temperature": timestamp % 30, "running": True}, {})
+        rows = log.read(12 * 3600)
+        self.assertEqual(rows[0]["timestamp"], 0)
+        self.assertEqual(rows[-1]["timestamp"], 12 * 3600)
+        self.assertEqual(len(rows), 721)
+        self.assertFalse(log.events)
+
+    def test_external_change_is_copied_and_keeps_exact_time(self):
+        log = history.DiagnosticHistory()
+        log.record(0, {"running": True}, {})
+        event = {"type": "external_change", "changes": {"state": {"before": "heat", "after": "off"}}}
+        log.record(1, {"running": False}, {}, event=event)
+        event["changes"].clear()
+        rows = log.read(1)
+        self.assertEqual(rows[-1]["timestamp"], 1)
+        self.assertEqual(rows[-1]["event"]["changes"]["state"]["after"], "off")
 
     def test_export_copy_and_target_change(self):
         log = history.DiagnosticHistory()

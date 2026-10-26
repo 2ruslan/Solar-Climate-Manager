@@ -19,7 +19,7 @@ from .const import DEFAULTS, DOMAIN, REMOVED_SETTINGS
 from .domain.groups import MemberPolicy
 from .flow_helpers import vol
 from .group_flow import ensure_editable
-from .history import MAX_AGE, MAX_ROWS
+from .history import MAX_AGE, MAX_ROWS, SAMPLE_INTERVAL
 from .settings import configuration_values
 
 PANEL_PATH = "solar-climate-manager"
@@ -182,4 +182,6 @@ async def websocket_history(hass, connection, msg):
         "version": VERSION, "entry_id": entry.entry_id,
         "generated_at": now, "max_age_seconds": MAX_AGE,
         "max_rows": MAX_ROWS, "rows": coordinator.history.read(now),
+        "sample_interval_seconds": SAMPLE_INTERVAL,
+        "events_dropped_through": coordinator.history.events_dropped_through,
     })

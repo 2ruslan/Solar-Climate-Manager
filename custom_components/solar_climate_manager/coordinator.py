@@ -16,7 +16,7 @@ from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
 from .domain.learning import PowerLearning
 from .domain.types import DeviceConfig
 from .history import DiagnosticHistory
-from .manual import control_fingerprint
+from .manual import CONTROL_ATTRIBUTES, control_fingerprint
 from .model import temperature_celsius
 from .presentation import build_state
 from .runtime.commands import CommandExecutor
@@ -94,6 +94,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
     def _state_changed(self, event):
         if self.commands.closed:
             return
+        change = None
         if event.data.get("entity_id") == self.settings["climate_entity"]:
             old = event.data.get("old_state")
             new = event.data.get("new_state")
@@ -105,9 +106,16 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
                 and self.commands.is_own_update(old, new)
             )
             if before is not None and after is not None and before != after and not own:
+                change = {"type": "external_change", "changes": {
+                    key: {"before": left, "after": right}
+                    for key, left, right in zip(("state", *CONTROL_ATTRIBUTES), before, after, strict=True)
+                    if left != right
+                }}
                 self._set_operation_mode("temporary_block")
                 self.store.async_delay_save(self._stored_state, 1)
         self._evaluate()
+        if change:
+            self.history.record(dt_util.utcnow().timestamp(), self.data, self.settings, event=change)
 
     @callback
     def _tick(self, now):

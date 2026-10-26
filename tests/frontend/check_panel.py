@@ -24,12 +24,20 @@ import '/panel.js';
 window.fixture=await (await fetch('/fixture')).json();
 window.calls=[];window.offline=false;window.failWrite=false;
 window.current=null;
+const historyNow=1793023200;
+window.historyFixture={generated_at:historyNow,events_dropped_through:null,rows:Array.from({length:721},(_,i)=>({
+ timestamp:historyNow-43200+i*60,kind:'sample',state:{temperature:20+i/720,target_temperature:24,
+ running:i<690,automation_mode:i<690?'control':'temporary_block',pv_power:500,generation_forecast:700,
+ load_power:800,soc:80,grid_available:true,grid_power:300,grid_import_limit:1800,battery_power:0,
+ group_reason:i<690?'grid_ready':'temporary_block',control_allowed:i<690,manual_pause:i>=690}
+}))};
+historyFixture.rows.push({timestamp:historyNow-1800,kind:'event',event:{type:'external_change',changes:{state:{before:'heat',after:'off'}}},state:{...historyFixture.rows[690].state}});
 const menu=step=>({type:'menu',step_id:step,flow_id:'test',menu_options:step==='init'?['energy','group']:['group_create','group_join']});
 window.hass={language:'uk',user:{is_admin:true},connection:{},states:{
  'sensor.room':{entity_id:'sensor.room',attributes:{friendly_name:'Кімната'}},
  'climate.test':{entity_id:'climate.test',attributes:{friendly_name:'Вітальня'}}
 },
- callWS:async msg=>{if(window.offline)throw Error('offline');return {...structuredClone(fixture.overview),translations:fixture.labels[msg.language]};},
+ callWS:async msg=>{if(window.offline)throw Error('offline');if(msg.type==='solar_climate_manager/history')return structuredClone(historyFixture);return {...structuredClone(fixture.overview),translations:fixture.labels[msg.language]};},
  callService:async (...args)=>{calls.push(['service',...args]);},
  callApi:async(method,path,data)=>{
   calls.push([method,path,data]);
@@ -87,6 +95,29 @@ def main():
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(f"http://127.0.0.1:{server.server_port}")
             expect(page.get_by_role("heading", name="Будинок")).to_be_visible()
+            page.get_by_role("button", name="Історія та діагностика", exact=True).first.click()
+            expect(page.get_by_role("heading", name="Статистика за 12 годин")).to_be_visible()
+            expect(page.locator(".history-stats")).to_contain_text("12.00 год")
+            expect(page.locator(".history-stats")).to_contain_text("11.50 год")
+            expect(page.locator(".history-stats")).to_contain_text("0.50 год")
+            expect(page.locator(".history-events")).to_contain_text("Зовнішня зміна")
+            expect(page.locator(".history-events")).to_contain_text('"off"')
+            assert page.locator("dialog tbody tr").count() == 722
+            page.screenshot(path="/tmp/scm-history-desktop.png", full_page=True)
+            page.set_viewport_size({"width": 390, "height": 844})
+            page.screenshot(path="/tmp/scm-history-mobile.png", full_page=True)
+            assert page.locator("dialog").evaluate("el=>el.scrollWidth<=el.clientWidth+1")
+            page.get_by_role("button", name="Закрити", exact=True).click()
+            page.set_viewport_size({"width": 1280, "height": 1080})
+            summary = page.evaluate("""async () => {
+              const {historySummary}=await import('/panel.js');
+              return historySummary([{timestamp:0,state:{running:true}},
+               {timestamp:60,state:{running:false}},{timestamp:600,state:{running:true}}],660);
+            }""")
+            assert summary["totals"]["covered"] == 120
+            assert summary["totals"]["on"] == 120
+            assert summary["totals"]["off"] == 0
+            assert summary["unknown"] == 43200 - 120
             page.screenshot(path="/tmp/scm-panel-desktop.png", full_page=True)
             page.locator(".device").first.locator("summary").filter(has_text="Споживання").click()
             expect(page.locator("dialog")).not_to_be_visible()
@@ -183,6 +214,9 @@ def main():
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
             page.evaluate("hass.language='en';panel.hass={...hass}")
             expect(page.get_by_role("button", name="Create group", exact=True)).to_be_visible()
+            page.get_by_role("button", name="History and diagnostics", exact=True).first.click()
+            expect(page.get_by_role("heading", name="12-hour statistics")).to_be_visible()
+            page.get_by_role("button", name="Close", exact=True).click()
             page.evaluate("fixture.overview.groups[0].name='<img src=x onerror=alert(1)>';panel.refresh()")
             expect(page.get_by_role("heading", name="<img src=x onerror=alert(1)>")).to_be_visible()
             assert page.locator("img").count() == 0

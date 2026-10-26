@@ -31,7 +31,8 @@ const TEXT = {
     resetLearning: "Скинути навчання",
     history: "Історія та діагностика", exportHistory: "Завантажити JSON", time: "Час",
     decision: "Рішення / причина", command: "Команда / помилка", actual: "Фактичний стан",
-    historyHint: "До 24 годин / 3000 записів на пристрій. Збір працює із закритою сторінкою; перезапуск HA або перезавантаження інтеграції очищає історію. Таблиця: останні 200 записів; JSON: усі доступні записи. Час — локальний для браузера. Рішення не є підтвердженням виконання команди.",
+    historyHint: "Останні 12 годин. Хвилинні знімки зберігаються окремо від подій до 24 годин; збір працює із закритою сторінкою. Перезапуск HA або reload очищає історію. Час — локальний для браузера. Рішення не підтверджує команду; увімкнений режим не доводить роботу компресора. JSON містить усю доступну історію.",
+    stats12: "Статистика за 12 годин", covered: "Покриття даними", unknown: "Невідомий час", onTime: "Увімкнений режим", offTime: "Вимкнений режим", blockedTime: "Тимчасове блокування", hours: "год", events: "Події та причини", telemetry: "Показники за 12 годин", event: "Подія", externalChange: "Зовнішня зміна (не розпізнана як власна)", stateChange: "Зміна стану / рішення", eventLoss: "Частина подій витіснена лімітом; хвилинні знімки збережено.", ranges: "Мінімум — максимум", pv: "Генерація / прогноз", battery: "Батарея / SOC", grid: "Мережа / імпорт / ліміт", acTemperature: "Температура AC / задана AC", guards: "Дозвіл / потреба / блокування", yes: "Так", no: "Ні",
     historyEmpty: "Історія ще не накопичена.",
     runningCount: "Працюють зараз", unavailableCount: "Недоступні",
   },
@@ -64,7 +65,8 @@ const TEXT = {
     resetLearning: "Reset learning",
     history: "History and diagnostics", exportHistory: "Download JSON", time: "Time",
     decision: "Decision / reason", command: "Command / error", actual: "Actual state",
-    historyHint: "Up to 24 hours / 3000 records per device. Collection continues with the page closed; HA restart or integration reload clears history. Table: latest 200 records; JSON: all available records. Times use the browser time zone. Decisions do not confirm command execution.",
+    historyHint: "Last 12 hours. Minute samples are retained separately from events for up to 24 hours, even with the page closed. HA restart or reload clears history. Times use the browser time zone. Decisions do not confirm commands; on mode does not prove compressor activity. JSON includes all available history.",
+    stats12: "12-hour statistics", covered: "Data coverage", unknown: "Unknown time", onTime: "On mode", offTime: "Off mode", blockedTime: "Temporary block", hours: "h", events: "Events and reasons", telemetry: "12-hour readings", event: "Event", externalChange: "External change (not recognized as our own)", stateChange: "State / decision change", eventLoss: "Some events were evicted by the limit; minute samples are retained.", ranges: "Minimum — maximum", pv: "Generation / forecast", battery: "Battery / SOC", grid: "Grid / import / limit", acTemperature: "AC temperature / AC setpoint", guards: "Permission / demand / block", yes: "Yes", no: "No",
     historyEmpty: "No history collected yet.",
     runningCount: "Running now", unavailableCount: "Unavailable",
   },
@@ -72,6 +74,23 @@ const TEXT = {
 
 export const fieldDefault = (field) => field.description?.suggested_value ?? field.default;
 export const fieldKind = (field) => Object.keys(field.selector || {})[0] || field.type;
+export function historySummary(input, now) {
+  const start=now-12*3600;
+  const all=input.filter(r=>Number.isFinite(r.timestamp) && r.timestamp<=now).slice().sort((a,b)=>a.timestamp-b.timestamp);
+  const rows=all.filter(r=>r.timestamp>=start);
+  const totals={covered:0,on:0,off:0,blocked:0};
+  for(let i=0;i<all.length;i++) {
+    const row=all[i], end=all[i+1]?.timestamp ?? now;
+    // Never extend a stale observation through a gap in collection.
+    if(end-row.timestamp>90)continue;
+    const seconds=Math.max(0,end-Math.max(start,row.timestamp));
+    totals.covered+=seconds;
+    if(row.state.running===true)totals.on+=seconds;
+    if(row.state.running===false)totals.off+=seconds;
+    if(row.state.automation_mode==="temporary_block")totals.blocked+=seconds;
+  }
+  return {start,rows,totals,unknown:12*3600-totals.covered};
+}
 const SHARED_SECTIONS = {
   grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay"],
   battery: ["soc_entity", "minimum_soc", "restart_soc", "battery_power_entity", "battery_positive"],
@@ -129,6 +148,8 @@ const STYLE = `
   .notice { padding:12px 16px; border-radius:10px; background:var(--secondary-background-color,#eff5f1); margin:12px 0; line-height:1.5; } .error { color:var(--error-color,#b93e3e); } #status:empty,#notice:empty { display:none; } .section { margin-top:30px; } select,input { border:1px solid var(--divider-color,#c9d7ce); color:var(--primary-text-color,#20352f); background:var(--card-background-color,#fff); border-radius:8px; min-height:42px; padding:9px; max-width:100%; } .mode { min-width:190px; } a { color:var(--primary-color,#22876c); }
   dialog { border:1px solid var(--divider-color,#dce5df); border-radius:16px; padding:0; width:min(620px,calc(100vw - 24px)); max-height:calc(100dvh - 32px); color:var(--primary-text-color,#20352f); background:var(--card-background-color,#fff); } dialog::backdrop { background:rgba(15,30,25,.5); } .dialog-body { padding:24px; } .dialog-head { display:flex; align-items:center; gap:12px; margin-bottom:12px; } form { display:grid; gap:16px; margin-top:18px; } label { display:grid; gap:7px; font-size:14px; } label.check { display:flex; align-items:center; gap:10px; } input[type=checkbox] { min-height:22px; width:22px; } .form-actions { display:flex; justify-content:flex-end; gap:10px; position:sticky; bottom:0; background:var(--card-background-color,#fff); padding:12px 0 0; } .menu { display:grid; gap:10px; margin-top:18px; } .menu button { text-align:start; } .field-error { font-size:13px; } .footer { margin:20px 0; }
   dialog.history { width:min(1200px,calc(100vw - 24px)); } .history-scroll { overflow:auto; max-height:60vh; margin-top:16px; } table { border-collapse:collapse; width:100%; font-size:13px; } th,td { text-align:start; padding:10px; border-bottom:1px solid var(--divider-color,#dce5df); min-width:120px; } th { position:sticky; top:0; background:var(--card-background-color,#fff); }
+  .history-events pre { white-space:pre-wrap; overflow-wrap:anywhere; } .history-stats .metric { overflow-wrap:anywhere; }
+  @media(max-width:700px) { .history-stats .metrics { grid-template-columns:1fr 1fr; } }
   @media(max-width:700px) { header { padding:12px; } h1 { font-size:18px; } main { padding:16px 12px; } .group { padding:16px; } .metrics { gap:7px; } .metric { padding:10px; } .metric strong { font-size:18px; } .values { grid-template-columns:1fr 1fr; } .values>div:last-child { grid-column:1/-1; } .actions { gap:7px; } .dialog-body { padding:18px; } .summary { gap:20px; } .device-top { flex-wrap:wrap; } }
   @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; } }
 `;
@@ -416,23 +437,74 @@ export class SolarClimatePanel extends HTMLElement {
         const link=el("a");link.href=url;link.download="solar-climate-history.json";body.append(link);link.click();link.remove();
         setTimeout(()=>URL.revokeObjectURL(url),1000);
       }));body.append(actions);
-      if (!result.rows.length) { body.append(el("p",this.t("historyEmpty")));return; }
+      const summary=historySummary(result.rows,result.generated_at);
+      const card=el("section",null,"group history-stats");card.append(el("h3",this.t("stats12")));
+      card.append(el("p",`${new Date(summary.start*1000).toLocaleString(this._lang)} — ${new Date(result.generated_at*1000).toLocaleString(this._lang)}`,"subtle"));
+      const metrics=el("div",null,"metrics");
+      for(const [key,seconds] of [["covered",summary.totals.covered],["unknown",summary.unknown],["onTime",summary.totals.on],["offTime",summary.totals.off],["blockedTime",summary.totals.blocked]]) {
+        const metric=el("div",this.t(key),"metric");metric.append(el("strong",`${(seconds/3600).toFixed(2)} ${this.t("hours")}`));metrics.append(metric);
+      }
+      card.append(metrics);body.append(card);
+      if(result.events_dropped_through>=summary.start)card.append(el("p",this.t("eventLoss"),"error"));
+      if (!summary.rows.length) { body.append(el("p",this.t("historyEmpty")));return; }
+      const chart=(title,fields,unit)=>{
+        const section=el("section",null,"group");section.append(el("h4",this.t(title)));
+        const ns="http://www.w3.org/2000/svg", svg=document.createElementNS(ns,"svg");
+        svg.setAttribute("viewBox","0 0 800 160");svg.setAttribute("role","img");svg.setAttribute("aria-label",this.t(title));svg.style.width="100%";
+        const values=summary.rows.flatMap(r=>fields.map(([key])=>r.state[key])).filter(v=>typeof v==="number" && Number.isFinite(v));
+        const low=Math.min(...values), high=Math.max(...values), span=high-low || 1;
+        const legend=el("p",null,"subtle");
+        fields.forEach(([key,label],index)=>{
+          const color=["#277dba","#cf6825","#208c60"][index];
+          const series=summary.rows.map(r=>r.state[key]).filter(v=>typeof v==="number" && Number.isFinite(v));
+          const item=el("span",`${label}: ${series.length?`${Math.min(...series).toFixed(1)} — ${Math.max(...series).toFixed(1)} ${unit}`:this.t("missing")} · `);item.style.color=color;legend.append(item);
+          let points=[],previous=null;
+          const flush=()=>{if(points.length){const line=document.createElementNS(ns,"polyline");line.setAttribute("points",points.join(" "));line.setAttribute("fill","none");line.setAttribute("stroke",color);line.setAttribute("stroke-width","2");svg.append(line);}points=[];};
+          for(const row of summary.rows){
+            const v=row.state[key];
+            if(typeof v!=="number" || !Number.isFinite(v)){flush();previous=null;continue;}
+            if(previous!==null && row.timestamp-previous>90)flush();
+            points.push(`${20+(row.timestamp-summary.start)/43200*760},${130-(v-low)/span*110}`);previous=row.timestamp;
+          }flush();
+        });
+        for(const [x,time] of [[20,summary.start],[780,result.generated_at]]) {const label=document.createElementNS(ns,"text");label.setAttribute("x",String(x));label.setAttribute("y","155");label.setAttribute("text-anchor",x===20?"start":"end");label.setAttribute("fill","currentColor");label.textContent=new Date(time*1000).toLocaleTimeString(this._lang);svg.append(label);}
+        section.append(el("p",this.t("ranges"),"subtle"),legend,svg);body.append(section);
+      };
+      chart("temperature",[["temperature",this.t("temperature")],["target_temperature",this.t("comfort")]],"°C");
+      chart("pv",[["pv_power","PV"],["generation_forecast",this.t("pv")],["load_power",this.t("load")]],"W");
+      chart("battery",[["soc","SOC"]],"%");
+      const eventSection=el("details",null,"group history-events");eventSection.open=true;
+      const events=summary.rows.filter(row=>row.kind==="event");eventSection.append(el("summary",`${this.t("events")} (${events.length})`));
+      const eventScroll=el("div",null,"history-scroll");
+      for(const row of events.slice().reverse()) {
+        const s=row.state, external=row.event?.type==="external_change";
+        const grouped=s.group_action && s.group_action!=="independent";
+        const text=`${new Date(row.timestamp*1000).toLocaleString(this._lang)} · ${this.t(external?"externalChange":"stateChange")} · ${this.stateText("operation_mode",s.automation_mode)} · ${s.running===true?this.t("on"):s.running===false?this.t("off"):this.t("missing")} · ${this.stateText(grouped?"group_reason":"strategy_reason",grouped?s.group_reason:s.strategy_reason)} · ${this.stateText("group_command_status",s.group_command_status)} / ${this.stateText("command_error",s.command_error)}`;
+        eventScroll.append(el("p",text));
+        if(external)eventScroll.append(el("pre",JSON.stringify(row.event.changes,null,2)));
+      }eventSection.append(eventScroll);body.append(eventSection);
+      body.append(el("h3",this.t("telemetry")));
       const scroll=el("div",null,"history-scroll");scroll.tabIndex=0;
       const table=el("table");const head=el("thead");const titles=el("tr");
-      for (const key of ["time","mode","temperature","actual","measured","available","reserve","decision","command"]) {
+      for (const key of ["time","mode","temperature","acTemperature","actual","measured","pv","load","grid","battery","available","reserve","guards","decision","command"]) {
         const th=el("th",this.t(key));th.scope="col";titles.append(th);
       }
       head.append(titles);table.append(head);const rows=el("tbody");
       const value=v=>v===null || v===undefined?this.t("missing"):String(v);
-      for (const row of result.rows.slice(-200).reverse()) {
+      const flag=v=>v===true?this.t("yes"):v===false?this.t("no"):this.t("missing");
+      for (const row of summary.rows.slice().reverse()) {
         const s=row.state;const tr=el("tr");
         if (s.command_failed || s.group_command_status==="failed" || s.invalid_data || s.energy_data_invalid) tr.className="error";
         const grouped=s.group_action && s.group_action!=="independent";
         const cells=[new Date(row.timestamp*1000).toLocaleString(this._lang),this.stateText("operation_mode",s.automation_mode),
-          `${value(s.temperature)} / ${value(s.target_temperature)} °C`,s.running===true?this.t("on"):s.running===false?this.t("off"):this.t("missing"),
-          s.power_accounting==="estimated"?this.t("missing"):this.watts(s.ac_power),this.watts(s.group_available_power),this.watts(s.group_reserved_power),
-          `${value(grouped?s.group_action:s.strategy_action)} / ${value(grouped?s.group_reason:s.strategy_reason)}`,
-          `${value(s.group_command_status)} / ${value(s.command_error)}`];
+          `${value(s.temperature)} / ${value(s.target_temperature)} °C`,`${value(s.ac_temperature)} / ${value(s.ac_set_temperature)} °C`,s.running===true?this.t("on"):s.running===false?this.t("off"):this.t("missing"),
+          s.effective_power_accounting==="estimated"?this.t("missing"):this.watts(s.ac_power),
+          `${this.watts(s.pv_power)} / ${this.watts(s.generation_forecast)}`,this.watts(s.load_power),
+          `${flag(s.grid_available)} / ${this.watts(s.grid_power)} / ${this.watts(s.grid_import_limit)}`,
+          `${this.watts(s.battery_power)} / ${value(s.soc)} %`,this.watts(s.group_available_power),this.watts(s.group_reserved_power),
+          `${flag(s.control_allowed)} / ${flag(s.demand)} / ${flag(s.manual_pause)}`,
+          `${this.stateText(grouped?"group_action":"strategy_action",grouped?s.group_action:s.strategy_action)} / ${this.stateText(grouped?"group_reason":"strategy_reason",grouped?s.group_reason:s.strategy_reason)}`,
+          `${this.stateText("group_command_status",s.group_command_status)} / ${this.stateText("command_error",s.command_error)}`];
         cells.forEach(cell=>tr.append(el("td",cell)));rows.append(tr);
       }
       table.append(rows);scroll.append(table);body.append(scroll);
