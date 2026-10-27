@@ -1,6 +1,7 @@
 """Event-driven observation and real climate control."""
 
 import logging
+from collections import ChainMap
 from dataclasses import replace
 from datetime import timedelta
 
@@ -13,6 +14,7 @@ from .adapters.sources import read_sources
 from .adapters.storage import create_store
 from .climate_control import normalized_target
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
+from .domain.configuration import GROUP_SETTING_KEYS, SettingsView, device_values
 from .domain.learning import PowerLearning
 from .domain.types import DeviceConfig
 from .history import DiagnosticHistory
@@ -43,6 +45,8 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.runtime = DeviceRuntime(self.settings)
         self.last_temperature = None
         self.power_learning = PowerLearning()
+        self._source_ids = None
+        self._source_unsub = None
         self.commands = CommandExecutor(
             hass, entry, self.runtime, lambda: self.data, self._evaluate, self._publish_command_error
         )
@@ -53,6 +57,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         super().async_set_updated_data(data)
 
     async def async_initialize(self):
+        self._remove_shared_device_values()
         saved = await self.store.async_load()
         if isinstance(saved, dict) and saved.get("temperature_entity") == self.settings["temperature_entity"]:
             value = saved.get("last_temperature")
@@ -61,18 +66,45 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         now = dt_util.utcnow().timestamp()
         self.runtime.restore(saved, self.entry.options, now)
         self.power_learning.restore(saved.get("power_learning") if isinstance(saved, dict) else None, now)
-        self.entry.async_on_unload(
-            async_track_state_change_event(
-                self.hass,
-                [self.settings["temperature_entity"], self.settings["climate_entity"]]
-                + [self.settings[key] for key in OPTIONAL_SOURCES if self.settings.get(key)],
-                self._state_changed,
-            )
-        )
+        self.entry.async_on_unload(lambda: self._source_unsub() if self._source_unsub else None)
         self.entry.async_on_unload(
             async_track_time_interval(self.hass, self._tick, timedelta(seconds=30))
         )
         self._evaluate()
+
+    def _membership(self):
+        repository = self.group_manager.repository if self.group_manager else None
+        registry = repository.registry if repository else None
+        member = registry.membership(self.device_id) if registry else None
+        return member, registry.group(member.group_id) if member else None
+
+    def effective_settings(self):
+        member, group = self._membership()
+        return SettingsView(ChainMap(self.settings, DEFAULTS), group, grouped=self.group_manager is not None)
+
+    def _remove_shared_device_values(self):
+        if self.group_manager is None or self.group_manager.repository.registry is None:
+            return
+        # Membership is already durable. Never copy shared settings back on leave.
+        data = device_values(self.entry.data, grouped=True)
+        options = device_values(self.entry.options, grouped=True)
+        if data != self.entry.data or options != self.entry.options:
+            self.hass.config_entries.async_update_entry(self.entry, data=data, options=options)
+        for key in GROUP_SETTING_KEYS:
+            self.settings.pop(key, None)
+            self.runtime.policy_signature.pop(key, None)
+
+    def _subscribe_sources(self, settings):
+        ids = frozenset(settings[key] for key in (
+            "temperature_entity", "climate_entity", *OPTIONAL_SOURCES
+        ) if settings.get(key))
+        if ids != self._source_ids:
+            if self._source_unsub:
+                self._source_unsub()
+            self._source_ids = ids
+            self._source_unsub = async_track_state_change_event(
+                self.hass, list(ids), self._state_changed,
+            )
 
     async def async_shutdown(self):
         """Complete persistence before a replacement coordinator loads the store."""
@@ -122,10 +154,12 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self._evaluate()
 
     @callback
-    def _evaluate(self):
+    def _evaluate(self, *, request_group=True):
         if self.commands.closed:
             return
-        settings = self.settings
+        self._remove_shared_device_values()
+        settings = self.effective_settings()
+        self._subscribe_sources(settings)
         self.runtime.device = DeviceConfig.from_settings(settings)
         stored_before = self._stored_state()
         today = dt_util.now().date()
@@ -139,7 +173,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             last_temperature=self.last_temperature,
         )
         self.last_temperature = sources.temperature
-        decision, strategy, manual = self.runtime.evaluate(sources, now, today)
+        decision, strategy, manual = self.runtime.evaluate(sources, now, today, settings=settings)
         if decision.data_valid and not decision.demand:
             climate = self.hass.states.get(settings["climate_entity"])
             unit = self.hass.config.units.temperature_unit
@@ -158,6 +192,9 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         )
         if self.group_manager is not None:
             data.update(self.group_manager.public_state(self))
+            member, group = self._membership()
+            if member is None or group is None:
+                data.update(control_allowed=False, energy_allowed=False)
         if stored_before != self._stored_state():
             self.store.async_delay_save(self._stored_state, 1)
         if self.data != data:
@@ -170,9 +207,9 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(data)
         self.history.record(now.timestamp(), data, settings)
         self.commands.schedule()
-        if self.group_manager is not None:
+        if self.group_manager is not None and request_group:
             self.group_manager.request_evaluation()
-        if self.group_observer is not None:
+        if self.group_observer is not None and request_group:
             self.group_observer.evaluate()
 
     @callback

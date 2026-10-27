@@ -123,8 +123,8 @@ async def async_overview(hass):
             if learning and policy.power_accounting == "estimated" else policy.planned_watts,
             "learning": learning,
             "measured_power": data.get("ac_power") if policy.power_accounting != "estimated" else None,
-            "action": data.get("group_action") if member else data.get("strategy_action"),
-            "reason": data.get("group_reason") if member else data.get("strategy_reason"),
+            "action": data.get("group_action"),
+            "reason": data.get("group_reason"),
             "command_status": data.get("group_command_status"),
             "edit_block": error or (_block(hass, registry, {identity}) if registry else None),
         })

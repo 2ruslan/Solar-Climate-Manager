@@ -93,7 +93,7 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         }
         return await self.flow.async_step_group_create({"name": "House", "priority": 3})
 
-    async def test_group_creation_copies_effective_settings_and_keeps_local_parameters(self):
+    async def test_group_creation_does_not_copy_device_settings(self):
         self.entry.options.update({
             "minimum_soc": 71, "restart_soc": 83, "grid_absence_minutes": 17,
             "battery_positive": "charge", "grid_positive": "export",
@@ -104,19 +104,21 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         original = dict(self.entry.options)
         form = await self.new_group()
         values = form["values"]
-        self.assertEqual(values["load_power_entity"], "sensor.house")
-        self.assertEqual(values["battery_positive"], "charge")
-        self.assertEqual(values["grid_positive"], "export")
-        self.assertFalse(values["grid_on_means_available"])
-        self.assertTrue(values["load_includes_battery_charging"])
+        self.assertIsNone(values["load_power_entity"])
+        self.assertEqual(values["battery_positive"], "discharge")
+        self.assertEqual(values["grid_positive"], "import")
+        self.assertTrue(values["grid_on_means_available"])
+        self.assertFalse(values["load_includes_battery_charging"])
         self.assertNotIn("forecast_power_now_entity", values)
-        self.assertEqual(values["load_scope"], "excludes_all_members")
+        self.assertEqual(values["load_scope"], "includes_all_members")
         self.assertNotIn("estimated_ac_power", values)
         self.assertNotIn("temperature_entity", values)
+        values.update(load_power_entity="sensor.house", soc_entity="sensor.soc",
+                      battery_power_entity="sensor.battery", grid_available_entity="binary_sensor.grid")
         form = await self.flow.async_step_group_sources(values)
-        self.assertEqual(form["values"]["minimum_soc"], 71)
-        self.assertEqual(form["values"]["restart_soc"], 83)
-        self.assertEqual(form["values"]["grid_absence_delay"], 1020)
+        self.assertEqual(form["values"]["minimum_soc"], 85)
+        self.assertEqual(form["values"]["restart_soc"], 90)
+        self.assertEqual(form["values"]["grid_absence_delay"], 600)
         self.assertEqual(self.entry.options, original)
 
     async def test_group_creation_honors_edits_and_does_not_restore_cleared_sources(self):
@@ -129,6 +131,8 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(form["values"]["soc_entity"])
         self.assertNotIn("forecast_power_now_entity", form["values"])
         values = {**form["values"], "soc_entity": "sensor.soc", "load_scope": "excludes_all_members"}
+        values.update(load_power_entity="sensor.house", battery_power_entity="sensor.battery",
+                      grid_available_entity="binary_sensor.grid")
         form = await self.flow.async_step_group_sources(values)
         self.assertEqual(form["step_id"], "group_policy")
         result = []
@@ -157,12 +161,10 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
     async def test_grouped_form_and_legacy_steps(self):
         result = await self.flow.async_step_init()
         self.assertEqual(list(result["data_schema"].schema),
-                         ["comfort", "grid", "battery", "solar", "consumption", "settings_action"])
-        grid = list(result["data_schema"].schema["grid"].schema)
-        self.assertEqual(grid.index("grid_on_means_available"), grid.index("grid_available_entity") + 1)
-        self.assertEqual(grid.index("grid_positive"), grid.index("grid_power_entity") + 1)
+                         ["comfort", "consumption", "settings_action"])
+        self.flow.async_step_group = AsyncMock(return_value={"type": "menu"})
         advanced = await self.flow.async_step_advanced()
-        self.assertEqual(set(advanced["data_schema"].schema), {"grid_absence_minutes"})
+        self.assertEqual(advanced["type"], "menu")
         energy = await self.flow.async_step_energy()
         self.assertNotIn("verification_delay", energy["data_schema"].schema)
         self.assertNotIn("enabled", energy["data_schema"].schema)
@@ -182,9 +184,8 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["data"]["operation_mode"], "disabled")
-        self.assertEqual(result["data"]["minimum_soc"], 90)
-        self.assertEqual(result["data"]["restart_soc"], 95)
-        self.assertEqual(result["data"]["pv_power_entity"], "sensor.pv")
+        for key in ("minimum_soc", "restart_soc", "pv_power_entity"):
+            self.assertNotIn(key, result["data"])
 
     async def test_grouped_save_flattens_sections_and_clears_optional_sources(self):
         await self.flow.async_step_init()
@@ -199,9 +200,9 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
         submitted["grid"]["grid_on_means_available"] = False
         result = await self.flow.async_step_init(submitted)
         self.assertEqual(result["type"], "create_entry")
-        self.assertIsNone(result["data"]["pv_power_entity"])
+        self.assertNotIn("pv_power_entity", result["data"])
         self.assertEqual(result["data"]["target_temperature"], 24)
-        self.assertFalse(result["data"]["grid_on_means_available"])
+        self.assertNotIn("grid_on_means_available", result["data"])
         self.assertNotIn("comfort", result["data"])
         self.assertNotIn("settings_action", result["data"])
 
@@ -218,15 +219,16 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
     async def test_conditional_limits_only_when_enabled(self):
         form = await self.flow.async_step_energy()
         self.assertEqual(
-            set(form["data_schema"].schema), {"estimated_ac_power", "minimum_soc", "restart_soc"}
+            set(form["data_schema"].schema), flow_module.ACCOUNTING_KEYS
         )
 
-    async def test_energy_rejects_equal_or_reversed_soc_thresholds(self):
+    async def test_device_energy_does_not_save_group_thresholds(self):
         for restart in (80, 85):
             result = await self.flow.async_step_energy({
                 "estimated_ac_power": 900, "minimum_soc": 85, "restart_soc": restart,
             })
-            self.assertEqual(result["errors"]["base"], "invalid_soc_thresholds")
+            self.assertNotIn("minimum_soc", result["data"])
+            self.assertNotIn("restart_soc", result["data"])
         result = await self.flow.async_step_energy({
             "estimated_ac_power": 900, "minimum_soc": 85, "restart_soc": 90,
         })
@@ -235,6 +237,8 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_clear_keeps_schedule_and_comfort(self):
         self.entry.options["schedule_entity"] = "schedule.day"
         self.put("schedule.day", "on")
+        self.flow.async_step_group = AsyncMock(return_value={"type": "menu"})
+        original = dict(self.entry.options)
         result = await self.flow.async_step_sources(
             {
                 "load_includes_ac": True,
@@ -244,9 +248,8 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
                 "grid_positive": "import",
             }
         )
-        self.assertIsNone(result["data"]["pv_power_entity"])
-        self.assertEqual(result["data"]["schedule_entity"], "schedule.day")
-        self.assertEqual(result["data"]["target_temperature"], 23)
+        self.assertEqual(result["type"], "menu")
+        self.assertEqual(self.entry.options, original)
 
     async def test_out_of_range_target_rejected_by_comfort_form(self):
         self.states["climate.ac"].attributes.update(min_temp=16, max_temp=30, supported_features=1)
@@ -288,12 +291,13 @@ class FlowLogicTests(unittest.IsolatedAsyncioTestCase):
             flow_module.validate(self.hass, {**values, "grid_import_limit_entity": "sensor.limit"}),
             "invalid_energy_source",
         )
-        schema = flow_module.settings_schema(self.flow.values(), flow_module.SOURCE_KEYS)
+        helpers = importlib.import_module("scm_adapter_test.flow_helpers")
+        schema = flow_module.settings_schema(self.flow.values(), helpers.SOURCE_KEYS)
         self.assertIn("grid_import_limit_entity", schema.schema)
 
     async def test_limit_source_can_be_cleared_without_changing_comfort(self):
         self.entry.options["grid_import_limit_entity"] = "number.limit"
+        self.flow.async_step_group = AsyncMock(return_value={"type": "menu"})
         result = await self.flow.async_step_sources({})
-        self.assertEqual(result["type"], "create_entry")
-        self.assertIsNone(result["data"]["grid_import_limit_entity"])
-        self.assertEqual(result["data"]["target_temperature"], 23)
+        self.assertEqual(result["type"], "menu")
+        self.flow.async_step_group.assert_awaited_once()

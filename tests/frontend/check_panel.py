@@ -137,23 +137,25 @@ def main():
             assert saved["consumption"]["power_learning_enabled"] is True
             assert "ac_power_entity" not in saved["consumption"]
             assert "temperature_entity" in saved["comfort"]
-            page.locator(".device").last.locator("summary").filter(has_text="Мережа").click()
-            for title in ("Клімат і розклад", "Мережа", "Батарея", "Сонячна генерація", "Споживання"):
+            for title in ("Клімат і розклад", "Споживання"):
                 expect(page.locator(".device").last.locator("summary").filter(has_text=title)).to_be_visible()
+            for title in ("Мережа", "Батарея", "Сонячна генерація"):
+                expect(page.locator(".device").last.locator("summary").filter(has_text=title)).to_have_count(0)
+            page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Мережа").click()
             page.locator('[name="grid_on_means_available"]').uncheck()
             page.locator('[name="grid_positive"]').select_option("export")
             page.get_by_role("button", name="Зберегти", exact=True).click()
             saved = page.evaluate("calls.at(-1)[2]")
-            assert saved["grid"]["grid_on_means_available"] is False
-            assert saved["grid"]["grid_positive"] == "export"
-            assert set(saved) == {"comfort", "grid", "battery", "solar", "consumption", "settings_action"}
+            assert saved["grid_on_means_available"] is False
+            assert saved["grid_positive"] == "export"
+            assert "comfort" not in saved
             expect(page.locator('[name="grid_positive"]')).to_have_count(0)
-            page.locator(".device").last.locator("summary").filter(has_text="Сонячна генерація").click()
+            page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Сонячна генерація").click()
             page.locator('[name="generation_forecast_entity"]').fill("sensor.forecast")
             page.get_by_role("button", name="Зберегти", exact=True).click()
             expect(page.locator('[name="generation_forecast_entity"]')).to_have_count(0)
             saved = page.evaluate("calls.at(-1)[2]")
-            assert saved["solar"]["generation_forecast_entity"] == "sensor.forecast"
+            assert saved["generation_forecast_entity"] == "sensor.forecast"
             page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Батарея").click()
             page.locator('[name="minimum_soc"]').fill("70")
             page.get_by_role("button", name="Зберегти", exact=True).click()

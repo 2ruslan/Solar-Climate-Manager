@@ -1,6 +1,5 @@
 """Grouped configuration; hidden settings survive edits."""
 
-from dataclasses import asdict
 from uuid import uuid4
 
 from homeassistant import config_entries
@@ -11,8 +10,8 @@ from homeassistant.helpers import selector
 from .adapters.groups import get_group_repository
 from .adapters.migrations import CONFIG_VERSION
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
+from .domain.configuration import SettingsView, device_values
 from .flow_helpers import (
-    SOURCE_KEYS,
     flatten_settings_sections,
     grouped_settings_schema,
     settings_schema,
@@ -22,9 +21,7 @@ from .flow_helpers import (
 from .group_flow import GroupOptionsMixin, ensure_editable, flow_error
 from .settings import (
     ACCOUNTING_KEYS,
-    ADVANCED_KEYS,
     COMFORT_KEYS,
-    ENERGY_KEYS,
     configuration_values,
     merge_section,
 )
@@ -37,12 +34,13 @@ class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             values = {**DEFAULTS, **user_input}
-            error = validate(self.hass, values)
+            error = validate(self.hass, SettingsView(values, grouped=True))
             if error is None:
                 await self.async_set_unique_id(values["climate_entity"])
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=values["climate_entity"], data={**values, "device_id": uuid4().hex}
+                    title=values["climate_entity"], data=device_values(
+                        {**values, "device_id": uuid4().hex}, grouped=True)
                 )
             errors["base"] = error
         keys = (COMFORT_KEYS - {"schedule_entity"}) | {"climate_entity"}
@@ -64,11 +62,7 @@ class SolarClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 registry = await get_group_repository(self.hass).async_load()
                 identity = entry.data.get("device_id", entry.entry_id)
                 ensure_editable(self.hass, registry, {identity})
-                member = registry.membership(identity)
-                group = registry.group(member.group_id) if member else None
-                validation_values = (
-                    {**merged, **asdict(group.sources), **asdict(group.policy)} if group else merged
-                )
+                validation_values = SettingsView(merged, grouped=True)
                 error = validate(self.hass, validation_values)
             except (ValueError, OSError, HomeAssistantError) as failure:
                 error = flow_error(failure)
@@ -128,11 +122,7 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
 
     async def async_step_init(self, user_input=None):
         member = self.cached_membership()
-        keys = (
-            COMFORT_KEYS | ACCOUNTING_KEYS
-            if member
-            else COMFORT_KEYS | SOURCE_KEYS | ENERGY_KEYS | ADVANCED_KEYS
-        )
+        keys = COMFORT_KEYS | ACCOUNTING_KEYS
         if user_input is not None:
             action = user_input.get("settings_action", "save")
             if action == "group":
@@ -153,9 +143,9 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
             except (ValueError, OSError, HomeAssistantError) as error:
                 return self.async_show_form(step_id="learning_reset", data_schema=vol.Schema({}),
                                             errors={"base": flow_error(error)})
-            return self.async_create_entry(title="", data={
+            return self.async_create_entry(title="", data=device_values({
                 **self.values(), "power_learning_generation": uuid4().hex,
-            })
+            }, grouped=True))
         self._reset_original = current
         return self.async_show_form(step_id="learning_reset", data_schema=vol.Schema({}))
 
@@ -201,17 +191,14 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
                 return self.async_abort(reason="configuration_changed")
             merged = merge_section(
                 values,
-                user_input,
+                {key: value for key, value in user_input.items() if key in keys},
                 clear_sources=keys & set(OPTIONAL_SOURCES),
                 removed=REMOVED_SETTINGS,
             )
-            validation_values = merged
+            validation_values = SettingsView(merged, grouped=True)
             error = None
             if member:
                 registry = await self._registry()
-                group = registry.group(member.group_id)
-                if group:
-                    validation_values = {**merged, **asdict(group.sources), **asdict(group.policy)}
                 if any(
                     merged.get(key) != values.get(key)
                     for key in (*ACCOUNTING_KEYS, "temperature_entity")
@@ -230,12 +217,12 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
                         error = flow_error(failure)
             error = error or validate(self.hass, validation_values)
             if error is None:
-                return self.async_create_entry(title="", data=merged)
+                return self.async_create_entry(title="", data=device_values(merged, grouped=True))
             return self.form(step, keys, merged, {"base": error})
         return self.form(step, keys, values)
 
     async def async_step_sources(self, user_input=None):
-        return await self.section("sources", SOURCE_KEYS, user_input)
+        return await self.async_step_group_sources(user_input) if self.cached_membership() else await self.async_step_group()
 
     async def async_step_comfort(self, user_input=None):
         return await self.section("comfort", COMFORT_KEYS, user_input)
@@ -243,7 +230,7 @@ class SolarClimateOptionsFlow(GroupOptionsMixin, config_entries.OptionsFlowWithR
     async def async_step_advanced(self, user_input=None):
         if self.cached_membership():
             return await self.async_step_group_policy(user_input)
-        return await self.section("advanced", ADVANCED_KEYS, user_input)
+        return await self.async_step_group()
 
     async def async_step_energy(self, user_input=None):
-        return await self.section("energy", ENERGY_KEYS, user_input)
+        return await self.section("energy", ACCOUNTING_KEYS, user_input)

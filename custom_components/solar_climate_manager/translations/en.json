@@ -572,6 +572,7 @@
       "group_reason": {
         "name": "Group decision reason",
         "state": {
+          "not_grouped": "Not assigned to a group — automatic control unavailable",
           "independent": "Independent",
           "group_not_ready": "Group not ready",
           "group_store_unavailable": "Group store unavailable",

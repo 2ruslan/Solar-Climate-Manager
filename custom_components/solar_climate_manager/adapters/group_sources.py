@@ -1,11 +1,11 @@
 """Capture one coherent group snapshot without changing any member runtime."""
 
 from collections.abc import Callable
-from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any
 
 from ..domain.allocator import DeviceRequest, GroupSnapshot
+from ..domain.configuration import SettingsView
 from ..domain.groups import GroupConfig, MemberPolicy, Membership
 from ..domain.types import DeviceConfig, EnergySnapshot
 from ..manual import pause_active
@@ -38,12 +38,9 @@ def capture_group(
                 )
             )
             continue
-        settings = {**coordinator.settings, **asdict(group.policy), **asdict(group.sources)}
-        settings["load_includes_ac"] = group.policy.load_scope == "includes_all_members"
+        settings = SettingsView(coordinator.settings, group)
         member_policy = MemberPolicy.from_settings(settings)
         member_policy = effective_policy(coordinator, group, members, member_policy, now.timestamp())
-        if member_policy.power_accounting == "estimated":
-            settings["ac_power_entity"] = None
         source = read_sources(
             get_state,
             settings,

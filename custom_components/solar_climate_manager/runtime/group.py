@@ -119,13 +119,8 @@ class GroupManager:
             self.request_evaluation()
 
     def controls(self, device_id: str) -> bool:
-        registry = self.repository.registry
-        # Unknown membership cannot fall back to the standalone start path.
-        return (
-            device_id in self.mutating_devices
-            or registry is None
-            or registry.membership(device_id) is not None
-        )
+        # Every device requires group authorization, including before joining.
+        return True
 
     def has_pending(self, device_id: str) -> bool:
         registry = self.repository.registry
@@ -360,10 +355,7 @@ class GroupManager:
                     observer.evaluate()
                 for coordinator in tuple(self.devices.values()):
                     if coordinator.data and not coordinator.commands.closed:
-                        coordinator.async_set_updated_data(
-                            {**coordinator.data, **self.public_state(coordinator)}
-                        )
-                        coordinator.commands.schedule()
+                        coordinator._evaluate(request_group=False)
         finally:
             self.task = None
 
@@ -430,7 +422,7 @@ class GroupManager:
             return False
         source = read_sources(
             self.hass.states.get,
-            coordinator.settings,
+            coordinator.effective_settings(),
             coordinator.runtime.device,
             self.hass.config.units.temperature_unit,
             dt_util.utcnow(),
@@ -594,8 +586,8 @@ class GroupManager:
             "group_available_power": None,
             "group_load_power": None,
             "group_reserved_power": None,
-            "group_action": "independent",
-            "group_reason": "independent",
+            "group_action": "wait",
+            "group_reason": "not_grouped",
             "group_command_status": "idle",
         }
         if hasattr(coordinator, "power_learning"):

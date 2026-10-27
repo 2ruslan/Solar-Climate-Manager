@@ -71,15 +71,26 @@ async def test_shared_forecast_changes_budget_and_can_be_removed(hass):
     assert repository.registry.group(group_id).sources.generation_forecast_entity == "sensor.forecast"
     for device in (first, second):
         assert device.runtime_data.data["group_available_power"] == 1400
+        assert device.runtime_data.data["generation_forecast"] == 2000
+        assert device.runtime_data.history.latest["state"]["generation_forecast"] == 2000
+    hass.states.async_set("sensor.forecast", "2.5", {"unit_of_measurement": "kW"})
+    await hass.async_block_till_done()
+    for device in (first, second):
+        assert device.runtime_data.data["generation_forecast"] == 2500
+        assert device.runtime_data.history.latest["state"]["generation_forecast"] == 2500
     hass.states.async_set("sensor.forecast", "unavailable", {"unit_of_measurement": "kW"})
     await hass.async_block_till_done()
     assert first.runtime_data.data["group_available_power"] == 1000
+    for device in (first, second):
+        assert device.runtime_data.data["generation_forecast"] is None
+        assert device.runtime_data.history.latest["state"]["generation_forecast"] is None
     form = await group_form(hass, first, "group_settings")
     values.pop("generation_forecast_entity")
     result = await submit(hass, form, values)
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
     assert repository.registry.group(group_id).sources.generation_forecast_entity is None
+    assert first.runtime_data.data["generation_forecast"] is None
 
 
 async def test_shared_settings_reject_stale_form_and_invalid_thresholds(hass):
@@ -200,7 +211,9 @@ async def test_group_join_priority_leave_and_delete(hass):
         form = await group_form(hass, entry, "group_leave")
         assert (await submit(hass, form, {}))["type"] == "create_entry"
         await hass.async_block_till_done()
-        assert entry.runtime_data.data["group_action"] == "independent"
+        assert entry.runtime_data.data["group_action"] == "wait"
+        assert entry.runtime_data.data["group_reason"] == "not_grouped"
+        assert entry.runtime_data.data["control_allowed"] is False
     form = await group_form(hass, first, "group_delete")
     assert (await submit(hass, form, {"group_id": group_id}))["type"] == "create_entry"
     await hass.async_block_till_done()

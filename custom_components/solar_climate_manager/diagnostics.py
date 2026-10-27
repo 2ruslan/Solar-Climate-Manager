@@ -6,7 +6,7 @@ from .presentation import build_export
 async def async_get_config_entry_diagnostics(hass, entry):
     coordinator = entry.runtime_data
     data = build_export(
-        coordinator.settings,
+        coordinator.effective_settings(),
         coordinator.data,
         coordinator.runtime.manual_date,
         coordinator.runtime.previous_mode,

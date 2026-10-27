@@ -10,23 +10,17 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.solar_climate_manager.const import DEFAULTS, DOMAIN
-from custom_components.solar_climate_manager.flow_helpers import SETTINGS_SECTIONS, SOURCE_KEYS
+from custom_components.solar_climate_manager.flow_helpers import SETTINGS_SECTIONS
 from custom_components.solar_climate_manager.settings import (
     ACCOUNTING_KEYS,
-    ADVANCED_KEYS,
     COMFORT_KEYS,
-    ENERGY_KEYS,
 )
 
 
 def grouped_input(entry, **updates):
     values = {**DEFAULTS, **entry.data, **entry.options, **updates}
-    member = entry.runtime_data.group_manager.repository.registry.membership(
-        entry.runtime_data.device_id
-    )
-    names = ("comfort", "consumption") if member else SETTINGS_SECTIONS
-    keys = (COMFORT_KEYS | ACCOUNTING_KEYS if member
-            else COMFORT_KEYS | SOURCE_KEYS | ENERGY_KEYS | ADVANCED_KEYS)
+    names = ("comfort", "consumption")
+    keys = COMFORT_KEYS | ACCOUNTING_KEYS
     return {
         name: {key: values[key] for key in SETTINGS_SECTIONS[name]
                if key in keys and values.get(key) is not None}
@@ -72,7 +66,24 @@ async def setup(hass, *, energy_ready=False):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    if energy_ready and entry.runtime_data.group_manager.repository.registry is not None:
+        await attach_energy_group(hass, entry)
     return entry
+
+
+async def attach_energy_group(hass, entry, **sources):
+    from custom_components.solar_climate_manager.domain.groups import GroupPolicy, GroupSources
+
+    hass.states.async_set("sensor.load", "600", {"unit_of_measurement": "W"})
+    repository = entry.runtime_data.group_manager.repository
+    registry = await repository.async_update(lambda state: state.create(
+        "Energy", GroupSources(load_power_entity="sensor.load", soc_entity="sensor.soc",
+                               battery_power_entity="sensor.battery",
+                               grid_available_entity="binary_sensor.grid", **sources),
+        GroupPolicy())[0])
+    await repository.async_update(lambda state: state.join(
+        entry.runtime_data.device_id, registry.groups[-1].group_id))
+    await hass.async_block_till_done()
 
 
 async def test_flow_and_duplicate(hass):
@@ -160,6 +171,7 @@ async def test_solar_sources_independent_of_temperature(hass):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    await attach_energy_group(hass, entry, pv_power_entity="sensor.pv")
     assert entry.runtime_data.data["pv_power"] == 2800
     assert "forecast_power_now" not in entry.runtime_data.data
     hass.states.async_set("sensor.pv", "unavailable")
@@ -173,8 +185,8 @@ async def test_solar_sources_independent_of_temperature(hass):
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
-    assert entry.options["pv_power_entity"] is None
-    assert entry.runtime_data.settings["pv_power_entity"] is None
+    assert "pv_power_entity" not in entry.options
+    assert "pv_power_entity" not in entry.runtime_data.settings
 
 
 async def test_reload_removes_retired_forecast_entities(hass):
@@ -199,11 +211,7 @@ async def test_reload_removes_retired_forecast_entities(hass):
 async def test_optional_generation_forecast_options_reload_and_live_updates(hass):
     entry = await setup(hass)
     hass.states.async_set("sensor.forecast", "3.8", {"unit_of_measurement": "kW"})
-    form = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        form["flow_id"], grouped_input(entry, generation_forecast_entity="sensor.forecast"))
-    assert result["type"] == "create_entry"
-    await hass.async_block_till_done()
+    await attach_energy_group(hass, entry, generation_forecast_entity="sensor.forecast")
     assert entry.runtime_data.data["generation_forecast"] == 3800
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -216,18 +224,20 @@ async def test_optional_generation_forecast_options_reload_and_live_updates(hass
         form["flow_id"], grouped_input(entry, generation_forecast_entity=None))
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
-    assert entry.runtime_data.settings["generation_forecast_entity"] is None
+    assert "generation_forecast_entity" not in entry.runtime_data.settings
+    assert entry.runtime_data.effective_settings()["generation_forecast_entity"] == "sensor.forecast"
 
 
 async def test_reject_energy_sensor_as_solar_power(hass):
-    states(hass)
+    from dataclasses import replace
+
+    from custom_components.solar_climate_manager.group_flow import validate_group_sources
+
+    first, _, repository, group_id = await setup_shadow_group(hass)
     hass.states.async_set("sensor.energy", "5", {"unit_of_measurement": "kWh"})
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_USER},
-        data={**inputs(), "pv_power_entity": "sensor.energy"},
-    )
-    assert result["errors"]["base"] == "invalid_power"
+    with pytest.raises(ValueError, match="invalid_power"):
+        validate_group_sources(hass, replace(repository.registry.group(group_id).sources,
+                                            pv_power_entity="sensor.energy"))
 
 
 async def test_select_mode_replaces_switch_and_survives_reload(hass):
@@ -271,6 +281,7 @@ async def test_grid_energy_permission_survives_disabled_mode(hass):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    await attach_energy_group(hass, entry)
     assert entry.runtime_data.data["energy_allowed"]
     assert entry.runtime_data.data["energy_reason"] == "grid_ready"
     assert not entry.runtime_data.data["control_allowed"]
@@ -345,6 +356,8 @@ async def test_inverter_limit_and_low_soc_charging(hass):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    await attach_energy_group(hass, entry, grid_power_entity="sensor.grid",
+                              grid_import_limit_entity="number.limit")
     assert entry.runtime_data.data["energy_allowed"]
     assert entry.runtime_data.data["grid_import_limit"] == 3000
     assert entry.runtime_data.data["grid_import_margin"] == 100

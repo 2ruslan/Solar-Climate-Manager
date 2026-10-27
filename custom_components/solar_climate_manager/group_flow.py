@@ -192,17 +192,14 @@ class GroupOptionsMixin:
                 if state.membership(self.device_id):
                     raise ValueError("device_already_grouped")
                 name = group_name(user_input["name"])
-                values = self.values()
                 self._draft = {
                     "name": name,
                     "priority": priority(user_input["priority"]),
                     "sources": {
-                        **{k: values.get(k) for k in SHARED_SOURCE_KEYS},
-                        **{k: values[k] for k in GROUP_FLAGS},
-                        "load_scope": "includes_all_members" if values["load_includes_ac"]
-                        else "excludes_all_members",
+                        **asdict(GroupSources()),
+                        **{k: getattr(GroupPolicy(), k) for k in GROUP_FLAGS | {"load_scope"}},
                     },
-                    "policy": {k: values[k] for k in POLICY_KEYS},
+                    "policy": {k: getattr(GroupPolicy(), k) for k in POLICY_KEYS},
                 }
                 return await self.async_step_group_sources()
             except (ValueError, OSError, HomeAssistantError) as error:

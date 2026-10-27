@@ -1,5 +1,6 @@
 """Build public entity and export data without making control decisions."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from .domain.sources import SourceSnapshot
@@ -90,7 +91,7 @@ def build_state(
 
 
 def build_export(
-    settings: dict[str, Any],
+    settings: Mapping[str, Any],
     data: dict[str, Any] | None,
     manual_date: str | None,
     previous_mode: str | None,

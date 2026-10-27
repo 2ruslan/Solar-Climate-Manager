@@ -1,5 +1,6 @@
 """Versioned group configuration; no allocation or physical command side effects."""
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from math import isfinite
 from typing import Any, Literal
@@ -148,7 +149,7 @@ class MemberPolicy:
         return self.estimated_ac_power
 
     @classmethod
-    def from_settings(cls, settings: dict[str, Any]) -> "MemberPolicy":
+    def from_settings(cls, settings: Mapping[str, Any]) -> "MemberPolicy":
         policy = cls(
             **{
                 key: settings[key]

@@ -108,7 +108,7 @@ async def test_panel_assets_and_http_group_wizard_share_existing_operations(hass
     assert 'customElements.define("solar-climate-panel"' in await asset.text()
     independent = await start(client, first, "init")
     assert [field["name"] for field in independent["data_schema"]] == [
-        "comfort", "grid", "battery", "solar", "consumption", "settings_action",
+        "comfort", "consumption", "settings_action",
     ]
     assert (await client.delete(f"{BASE}/{independent['flow_id']}")).status == 200
     flow = await start(client, first, "group_create")

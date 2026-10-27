@@ -1,5 +1,6 @@
 """State and synchronous policy evaluation for one climate device."""
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
@@ -89,7 +90,8 @@ class DeviceRuntime:
         return None
 
     def evaluate(
-        self, sources: SourceSnapshot, now: datetime, today: date
+        self, sources: SourceSnapshot, now: datetime, today: date,
+        *, settings: Mapping[str, Any] | None = None,
     ) -> tuple[Decision, StrategyDecision, bool]:
         manual = pause_active(self.manual_date, today)
         decision = evaluate(
@@ -105,7 +107,8 @@ class DeviceRuntime:
         if sources.running is not None:
             self.observed = self.observed.observe(sources.running, now.timestamp())
         evaluation = decide(
-            sources.energy, self.observed, self.policy, EnergyPolicyConfig.from_settings(self.settings),
+            sources.energy, self.observed, self.policy,
+            EnergyPolicyConfig.from_settings(settings if settings is not None else self.settings),
             now=now.timestamp(), demand=decision.demand,
             enabled=self.settings["operation_mode"] != "disabled", manual=manual,
         )

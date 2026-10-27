@@ -2,7 +2,7 @@
 const TEXT = {
   uk: {
     subtitle: "Кондиціонери та спільний енергетичний бюджет", groups: "Енергетичні групи",
-    devices: "Пристрої", independent: "Поза групами", create: "Створити групу",
+    devices: "Пристрої", independent: "Не додані до групи", create: "Створити групу",
     add: "Додати кондиціонер", refresh: "Оновити", settings: "Налаштувати",
     sources: "Спільні джерела", policy: "Правила групи", rename: "Назва та пріоритет",
     join: "Додати до групи", leave: "Вийти з групи", remove: "Видалити порожню групу",
@@ -13,7 +13,7 @@ const TEXT = {
     priority: "Пріоритет", noGroups: "Створіть групу, щоб кондиціонери використовували спільний бюджет.",
     noDevices: "Спочатку додайте кондиціонер і датчик кімнатної температури.",
     noIndependent: "Усі пристрої вже належать до груп.", noMembers: "У цій групі ще немає пристроїв.",
-    noCandidates: "Немає незалежних пристроїв. Додайте кондиціонер або спочатку виведіть його з іншої групи.",
+    noCandidates: "Немає пристроїв для приєднання. Додайте кондиціонер або спочатку виведіть його з іншої групи.",
     choose: "Виберіть пристрій", next: "Далі", save: "Зберегти", confirm: "Підтвердити",
     cancel: "Скасувати", close: "Закрити", loading: "Завантаження…", saving: "Збереження…",
     saved: "Зміни збережено", failed: "Не вдалося виконати дію. Перевірте з’єднання та спробуйте ще раз.",
@@ -38,7 +38,7 @@ const TEXT = {
   },
   en: {
     subtitle: "Air conditioners and a shared energy budget", groups: "Energy groups",
-    devices: "Devices", independent: "Outside groups", create: "Create group", add: "Add air conditioner",
+    devices: "Devices", independent: "Not assigned to a group", create: "Create group", add: "Add air conditioner",
     refresh: "Refresh", settings: "Configure", sources: "Shared sources", policy: "Group policy",
     rename: "Name and priority", join: "Join group", leave: "Leave group", remove: "Delete empty group",
     comfort: "Comfort", energy: "Power accounting", reconfigure: "Change bindings",
@@ -48,7 +48,7 @@ const TEXT = {
     noGroups: "Create a group to share one energy budget between air conditioners.",
     noDevices: "Start by adding an air conditioner and its room temperature sensor.",
     noIndependent: "All devices already belong to groups.", noMembers: "This group has no devices yet.",
-    noCandidates: "No independent devices. Add an air conditioner or first remove it from another group.",
+    noCandidates: "No devices available to join. Add an air conditioner or first remove it from another group.",
     choose: "Choose a device", next: "Next", save: "Save", confirm: "Confirm", cancel: "Cancel",
     close: "Close", loading: "Loading…", saving: "Saving…", saved: "Changes saved",
     failed: "The action failed. Check the connection and try again.",
@@ -315,8 +315,8 @@ export class SolarClimatePanel extends HTMLElement {
       const status=this._labels?.selector?.learning_status?.options?.[learned.status] || learned.status;
       card.append(el("p",`${this.t("learning")}: ${status}${learned.learned_watts===null?"":` · ${this.watts(learned.learned_watts)}`}`,"subtle"));
     }
-    const action=this.stateText(device.group_id?"group_action":"strategy_action",device.action);
-    const reason=this.stateText(device.group_id?"group_reason":"strategy_reason",device.reason);
+    const action=this.stateText("group_action",device.action);
+    const reason=this.stateText("group_reason",device.reason);
     card.append(el("p",`${action} · ${reason}`,"reason"));
     if (device.group_id && device.command_status && device.command_status!=="idle") card.append(el("p",this.stateText("group_command_status",device.command_status),"subtle reason"));
     const actions=el("div",null,"actions");
@@ -341,7 +341,7 @@ export class SolarClimatePanel extends HTMLElement {
     }
     card.append(actions);
     if (device.edit_block) card.append(el("p",this.errorText(device.edit_block),"subtle"));
-    if (device.loaded) for (const name of (device.group_id ? ["comfort","consumption"] : ["comfort","grid","battery","solar","consumption"])) {
+    if (device.loaded) for (const name of ["comfort","consumption"]) {
       card.append(this.inlineSettings(device, name, false));
     }
     if(device.loaded) {
