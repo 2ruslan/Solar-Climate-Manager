@@ -97,33 +97,34 @@ class StrategyTests(unittest.TestCase):
     def test_low_soc_immediate_off_grid(self):
         self.observed = policy.ObservedDeviceState(running=True, last_start=0)
         self.state = policy.PolicyState()
-        result = self.decide(1, replace(self.snapshot, grid=False, soc=84))
+        result = self.decide(1, replace(self.snapshot, grid=False, soc=84, pv=0))
         self.assertEqual(result.reason, "low_soc")
         self.assertFalse(self.observed.running)
 
-    def test_soc_hysteresis_stops_immediately_and_waits_for_recovery(self):
-        self.start_solar()
-        self.assertEqual(self.decide(61, replace(self.snapshot, soc=84)).action, "stop")
-        self.assertTrue(self.state.soc_blocked)
-        for now, soc in ((200, 85), (300, 89), (400, 85)):
-            result = self.decide(now, replace(self.snapshot, soc=soc))
-            self.assertEqual(result.reason, "soc_recovery")
-            self.assertFalse(result.energy_allowed)
-        self.assertEqual(
-            self.decide(500, replace(self.snapshot, soc=90)).reason, "solar_ready"
-        )
-        self.assertEqual(self.decide(560, replace(self.snapshot, soc=90)).action, "continue")
-        self.assertEqual(self.decide(561, replace(self.snapshot, soc=85)).action, "continue")
+    def test_solar_forecast_starts_and_continues_below_both_soc_thresholds(self):
+        for soc in (0, 20, 84, 89):
+            with self.subTest(soc=soc):
+                self.setUp()
+                self.state.soc_blocked = True
+                sunny = replace(self.snapshot, soc=soc, pv=100, generation_forecast=2000)
+                self.assertEqual(self.decide(0, sunny).action, "start")
+                self.assertEqual(self.decide(1, sunny).action, "continue")
+                cloudy = replace(sunny, generation_forecast=500)
+                self.assertFalse(self.decide(2, cloudy).energy_allowed)
 
-    def test_off_grid_first_start_requires_upper_soc_threshold(self):
-        result = self.decide(0, replace(self.snapshot, soc=89))
-        self.assertEqual(result.reason, "soc_recovery")
-        self.assertTrue(self.state.soc_blocked)
+    def test_low_soc_insufficient_forecast_does_not_start(self):
+        for forecast in (None, 1000, float("nan"), -1):
+            with self.subTest(forecast=forecast):
+                self.setUp()
+                result = self.decide(0, replace(self.snapshot, soc=20, pv=100,
+                                              generation_forecast=forecast))
+                self.assertEqual(result.action, "wait")
+                self.assertFalse(result.energy_allowed)
 
     def test_soc_recovery_keeps_minimum_off_deadline(self):
         self.observed = policy.ObservedDeviceState(running=True, last_start=0)
         self.state = policy.PolicyState()
-        self.decide(1, replace(self.snapshot, soc=84))
+        self.decide(1, replace(self.snapshot, soc=84, pv=0))
         self.decide(2, replace(self.snapshot, soc=90))
         result = self.decide(62, replace(self.snapshot, soc=90))
         self.assertEqual(result.reason, "minimum_off")
@@ -131,14 +132,14 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(121, replace(self.snapshot, soc=90)).action, "start")
 
     def test_soc_block_survives_restore_and_missing_measurement(self):
-        self.decide(0, replace(self.snapshot, soc=84))
+        self.decide(0, replace(self.snapshot, soc=84, pv=0))
         saved = storage.serialize(self.observed, self.state)
         self.observed = policy.ObservedDeviceState()
         self.state = policy.PolicyState()
         self.observed, self.state = storage.restore(saved, 10)
         self.decide(10, replace(self.snapshot, soc=None))
         self.assertTrue(self.state.soc_blocked)
-        self.assertEqual(self.decide(20, replace(self.snapshot, soc=89)).reason, "soc_recovery")
+        self.assertEqual(self.decide(20, replace(self.snapshot, soc=89)).reason, "solar_ready")
         self.decide(30, replace(self.snapshot, soc=90))
         self.assertFalse(self.state.soc_blocked)
 
@@ -204,8 +205,8 @@ class StrategyTests(unittest.TestCase):
         self.observed = policy.ObservedDeviceState(running=True, last_start=0)
         for now, soc in ((1, 80), (2, 79), (3, 78)):
             self.assertEqual(self.decide(now, replace(self.snapshot, soc=soc)).action, "continue")
-        self.assertEqual(self.decide(4, replace(self.snapshot, soc=77)).reason, "low_soc")
-        self.assertEqual(self.decide(200, replace(self.snapshot, soc=80)).reason, "soc_recovery")
+        self.assertEqual(self.decide(4, replace(self.snapshot, soc=77, pv=0)).reason, "low_soc")
+        self.assertEqual(self.decide(200, replace(self.snapshot, soc=80)).reason, "solar_ready")
 
     def test_low_soc_discharge_does_not_mask_grid_budget_failures(self):
         grid = replace(

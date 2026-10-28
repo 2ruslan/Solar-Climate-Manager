@@ -119,19 +119,20 @@ class AllocatorTests(unittest.TestCase):
                 result = self.run_allocation(energy=replace(energy, **changes))
                 self.assertEqual(self.actions(result)["a"], ("wait", reason))
 
-    def test_running_member_uses_lower_soc_threshold_with_recovery_latch(self):
+    def test_solar_coverage_bypasses_soc_thresholds_for_all_members(self):
         self.policy = replace(self.policy, minimum_soc=78, restart_soc=85)
         self.state = replace(self.state, soc_blocked=True)
-        running = replace(self.requests[0], running=True, measured_watts=900, last_start=900)
-        for soc in (80, 79, 78):
+        running = replace(self.requests[0], running=True, measured_watts=900, last_start=0,
+                          state_reported_at=0, power_reported_at=1000)
+        for soc in (80, 79, 78, 20, 0):
             with self.subTest(soc=soc):
                 result = self.run_allocation(
                     requests=(running, self.requests[1]),
                     energy=replace(self.energy, soc=soc, load=1000, pv=3000),
                 )
                 self.assertEqual(self.actions(result)["a"], ("continue", "running"))
-                self.assertEqual(self.actions(result)["b"], ("wait", "soc_recovery"))
-        result = self.run_allocation(requests=(running,), energy=replace(self.energy, soc=77))
+                self.assertEqual(self.actions(result)["b"], ("start", "solar_ready"))
+        result = self.run_allocation(requests=(running,), energy=replace(self.energy, soc=77, load=1500, pv=500))
         self.assertEqual(self.actions(result)["a"], ("stop", "low_soc"))
 
     def test_low_soc_grid_running_member_still_obeys_limit_and_outage(self):
@@ -144,7 +145,7 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual(self.actions(result)["a"][0], "continue")
         for changes, reason in (
             ({"grid_power": 2001}, "grid_import_limit"),
-            ({"grid": False}, "low_soc"),
+            ({"grid": False, "pv": 0}, "low_soc"),
         ):
             with self.subTest(reason=reason):
                 stopped = self.run_allocation(
@@ -406,7 +407,7 @@ class AllocatorTests(unittest.TestCase):
         recovery = a.allocate(
             replace(self.snapshot, energy=replace(self.energy, soc=88)), state, self.policy
         )
-        self.assertEqual(recovery.reason, "soc_recovery")
+        self.assertEqual(recovery.reason, "solar_ready")
         ready = a.allocate(self.snapshot, recovery.state, self.policy)
         self.assertFalse(ready.state.soc_blocked)
 

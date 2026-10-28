@@ -440,12 +440,6 @@ def allocate(
         or energy.grid is None
     ):
         reason, hard = "invalid_energy_data", True
-    elif energy.grid is False and (
-        energy.soc < policy.minimum_soc
-        or energy.soc < policy.restart_soc and not any(r.running for r in snapshot.requests)
-    ):
-        blocked = True
-        reason, hard = "low_soc" if energy.soc < policy.minimum_soc else "soc_recovery", True
     elif not snapshot.complete or any(
         not r.available or r.running is None or r.watts is None for r in snapshot.requests
     ):
@@ -483,6 +477,12 @@ def allocate(
                 reason, hard = "invalid_solar_data", True
     if budget is not None and budget < 0:
         reason = "grid_import_limit" if energy.grid else "outage_deficit"
+    # Solar power can cover operation at any valid SOC. Protect the battery
+    # immediately only when that coverage is absent or cannot be established.
+    if (energy.grid is False and _valid(energy.soc)
+            and energy.soc is not None and energy.soc < policy.minimum_soc
+            and (budget is None or budget < 0)):
+        reason, hard = "low_soc", True
     deficit_since = (
         now
         if budget is not None and budget < 0 and state.deficit_since is None
@@ -570,10 +570,6 @@ def allocate(
             why = "unresolved_reservation"
         elif hard or available is None:
             pass
-        elif energy.grid is False and energy.soc is not None and energy.soc < policy.restart_soc:
-            # A running member uses the lower threshold; it cannot authorize
-            # another member to start below the restart threshold.
-            why = "soc_recovery"
         else:
             incremental = max(0.0, request.policy.planned_watts - (request.watts or 0))
             # Never trust a pre-start aggregate for manually started members either.

@@ -122,13 +122,6 @@ def decide(
             state.soc_blocked = True
         elif snapshot.soc >= cfg.restart_soc:
             state.soc_blocked = False
-        if snapshot.grid is not True and (
-            snapshot.soc < cfg.minimum_soc
-            or not observed_state.running and snapshot.soc < cfg.restart_soc
-        ):
-            state.soc_blocked = True
-            energy_reason = "low_soc" if snapshot.soc < cfg.minimum_soc else "soc_recovery"
-            return halt(energy_reason)
     if (
         snapshot.grid is None
         or snapshot.soc is None
@@ -182,6 +175,11 @@ def decide(
         state.window.clear()
         if not snapshot.grid:
             return halt("invalid_energy_data")
+
+    if (not snapshot.grid and snapshot.soc < cfg.minimum_soc
+            and solar_margin is not None and solar_margin < 0):
+        energy_reason = "low_soc"
+        return halt(energy_reason)
 
     if snapshot.grid:
         state.deficit_since = None

@@ -352,6 +352,7 @@ async def test_group_sensors_distinguish_proposals_and_actual_reservations(hass)
             if e.runtime_data.device_id == repository.registry.unresolved[0].device_id
         )
         assert owner.runtime_data.data["group_command_status"] == "awaiting_confirmation"
+        hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
         hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
         await hass.async_block_till_done()
         assert owner.runtime_data.data["group_action"] == "stop"

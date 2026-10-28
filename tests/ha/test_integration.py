@@ -690,6 +690,7 @@ async def test_group_control_revalidates_after_durable_write(hass, change):
         await save(data)
         if data["unresolved"]:
             if change == "soc":
+                hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
                 hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
             elif change == "mode":
                 for entry in (first, second):
@@ -729,6 +730,7 @@ async def test_group_control_shared_source_stops_running_member(hass):
         enable_group_control(first)
         await hass.async_block_till_done()
         calls.reset_mock()
+        hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
         hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
         await hass.async_block_till_done()
         assert any(c.args[1] == "set_hvac_mode" and c.args[2]["entity_id"] == "climate.test"
@@ -831,6 +833,7 @@ async def test_group_control_slow_start_does_not_block_other_protective_stop(has
             enable_group_control(first, second)
             await asyncio.wait_for(started.wait(), 5)
             assert repository.registry.unresolved
+            hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
             hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
             await asyncio.wait_for(stopped.wait(), 5)
             assert not release.is_set()
@@ -874,6 +877,7 @@ async def test_group_control_storage_failure_does_not_block_protective_stop(hass
         assert repository.registry.unresolved
         calls.reset_mock()
         with patch.object(type(repository.store), "async_save", side_effect=OSError("disk full")):
+            hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
             hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
             await hass.async_block_till_done()
         assert any(c.args[1] == "set_hvac_mode" for c in calls.call_args_list)
@@ -905,6 +909,7 @@ async def test_group_control_three_members_prioritize_and_account_for_manual_mem
         assert calls.call_count == 1
         assert calls.call_args.args[2]["entity_id"] == "climate.second"
         assert repository.registry.unresolved[0].device_id == high
+        hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
         hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
         await hass.async_block_till_done()
         assert not any(c.args[2]["entity_id"] == "climate.third" for c in calls.call_args_list)
@@ -931,6 +936,7 @@ async def test_group_control_manual_change_during_start_keeps_reservation(hass):
         reserve = repository.registry.unresolved[0]
         controlled = next(e for e in (first, second) if e.runtime_data.device_id == reserve.device_id)
         assert controlled.runtime_data.settings["operation_mode"] == "temporary_block"
+        hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
         hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
         await hass.async_block_till_done()
         assert len(records) == 1
@@ -988,6 +994,7 @@ async def test_group_control_off_report_during_save_is_not_dispatch_confirmation
                 report_off()
 
         with patch.object(type(repository.store), "async_save", side_effect=report_during_save):
+            hass.states.async_set("sensor.pv", "0", {"unit_of_measurement": "W"})
             hass.states.async_set("sensor.soc", "10", {"unit_of_measurement": "%"})
             await hass.async_block_till_done()
         assert any(c.args[1] == "set_hvac_mode" for c in calls.call_args_list)

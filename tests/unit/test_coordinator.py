@@ -482,6 +482,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         if self.coordinator.commands.task:
             await self.coordinator.commands.task
         self.put("binary_sensor.grid", "off")
+        self.put("sensor.pv", "0", unit_of_measurement="W")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
         await self.coordinator.commands.task
@@ -498,7 +499,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.put("sensor.soc", "88", unit_of_measurement="%")
         new = adapter.SolarClimateCoordinator(self.hass, self.entry)
         await new.async_initialize()
-        self.assertEqual(new.data["energy_reason"], "soc_recovery")
+        self.assertEqual(new.data["energy_reason"], "solar_ready")
         self.assertTrue(new.data["soc_blocked"])
         self.put("sensor.soc", "90", unit_of_measurement="%")
         new._evaluate()
@@ -738,6 +739,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         if self.coordinator.commands.task:
             await self.coordinator.commands.task
         self.put("binary_sensor.grid", "off")
+        self.put("sensor.pv", "0", unit_of_measurement="W")
         self.put("sensor.soc", "40", unit_of_measurement="%")
 
         async def hang(*args, **kwargs):
@@ -896,6 +898,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             if report_start:
                 self.device_response("heat")
             self.put("binary_sensor.grid", "off")
+            self.put("sensor.pv", "0", unit_of_measurement="W")
             self.put("sensor.soc", "40", unit_of_measurement="%")
             self.coordinator._evaluate()
             release.set()
@@ -930,6 +933,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_not_called()
 
     async def test_grid_energy_permission_ignores_discharge_but_requires_valid_soc(self):
+        self.put("sensor.pv", "0", unit_of_measurement="W")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.put("sensor.battery", "500", unit_of_measurement="W")
         self.coordinator._evaluate()
@@ -946,6 +950,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         if self.coordinator.commands.task:
             await self.coordinator.commands.task
         self.put("binary_sensor.grid", "off")
+        self.put("sensor.pv", "0", unit_of_measurement="W")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
         await self.coordinator.commands.task
@@ -960,6 +965,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             if service == "set_temperature":
                 clock.current += timedelta(seconds=6)
                 self.put("binary_sensor.grid", "off")
+                self.put("sensor.pv", "0", unit_of_measurement="W")
                 self.put("sensor.soc", "40", unit_of_measurement="%")
 
         self.hass.services.async_call.side_effect = delayed
@@ -1033,6 +1039,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.services.async_call.call_args.args[2]["temperature"], 27)
         self.assertEqual(self.hass.services.async_call.await_count, 2)
         self.put("binary_sensor.grid", "off")
+        self.put("sensor.pv", "0", unit_of_measurement="W")
         self.put("sensor.soc", "40", unit_of_measurement="%")
         self.coordinator._evaluate()
         await self.coordinator.commands.task
