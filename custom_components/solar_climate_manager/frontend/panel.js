@@ -172,9 +172,28 @@ export class SolarClimatePanel extends HTMLElement {
     this._hass = value;
     const lang = value.language?.startsWith("uk") ? "uk" : "en";
     if (lang !== this._lang) { this._lang = lang; this._labels = null; this._signature = null; }
+    this.updateEntityValues();
     if (this.isConnected && (changed || !this._data || !this._labels)) this.refresh();
   }
   get hass() { return this._hass; }
+  updateEntityValues() {
+    for (const input of this.shadowRoot.querySelectorAll("input[data-entity-preview]")) {
+      this.updateEntityValue(input);
+    }
+  }
+  updateEntityValue(input) {
+    const preview = input.parentElement.querySelector(".entity-value");
+    if (!preview) return;
+    const id = input.value.trim();
+    const state = this._hass.states?.[id];
+    preview.hidden = !id;
+    const uk = this._lang === "uk";
+    let value = !state ? (uk ? "Об’єкт не знайдено" : "Entity not found") :
+      state.state === "unavailable" ? (uk ? "Недоступно" : "Unavailable") :
+      state.state === "unknown" || state.state == null ? (uk ? "Невідомо" : "Unknown") :
+      `${state.state}${state.attributes.unit_of_measurement ? ` ${state.attributes.unit_of_measurement}` : ""}`;
+    preview.textContent = `${uk ? "Поточне значення" : "Current value"}: ${value}`;
+  }
   t(key) { return TEXT[this._lang][key] || key; }
   connectedCallback() {
     if (!this._shell) this._init();
@@ -649,6 +668,17 @@ export class SolarClimatePanel extends HTMLElement {
     if(kind==="boolean")input.checked=!!value;else if(value!==undefined && value!==null)input.value=String(value);
     const caption=el("span",`${text}${field.required?"":` (${this.t("optional")})`}`);
     label.append(caption,input);
+    if(kind==="entity") {
+      const preview=el("span",null,"entity-value subtle");
+      preview.id=`entity-value-${++this._fieldId}`;
+      preview.setAttribute("aria-live","polite");
+      input.dataset.entityPreview="";
+      input.setAttribute("aria-describedby",preview.id);
+      label.append(preview);
+      input.addEventListener("input",()=>this.updateEntityValue(input));
+      input.addEventListener("change",()=>this.updateEntityValue(input));
+      this.updateEntityValue(input);
+    }
     if(errors[field.name])label.append(el("span",this.errorText(errors[field.name]),"field-error error"));
     return label;
   }
