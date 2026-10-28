@@ -15,9 +15,36 @@ from custom_components.solar_climate_manager.panel import (
     ASSET_PATH,
     PANEL_PATH,
     async_overview,
+    dashboard_series,
 )
 
 BASE = "/api/config/config_entries/options/flow"
+
+
+async def test_dashboard_is_read_only_admin_only_and_filters_old_groups(hass, hass_ws_client, hass_read_only_access_token):
+    first, second, _, group_id = await setup_shadow_group(hass)
+    client = await hass_ws_client(hass)
+    with patch.object(type(hass.services), "async_call") as calls:
+        await client.send_json_auto_id({"type": f"{DOMAIN}/dashboard"})
+        response = await client.receive_json()
+        assert response["success"]
+        result = response["result"]
+        assert first.entry_id in result["devices"]
+        assert group_id in result["groups"]
+        assert set(result["devices"][first.entry_id][-1]["state"]) == {"temperature", "target_temperature"}
+        calls.assert_not_called()
+    readonly = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+    await readonly.send_json_auto_id({"type": f"{DOMAIN}/dashboard"})
+    assert (await readonly.receive_json())["error"]["code"] == "unauthorized"
+    for entry in (first, second):
+        history = entry.runtime_data.history
+        for row in (*history.samples, *history.events):
+            row["state"]["group_id"] = "former-group"
+        if history.latest:
+            history.latest["state"]["group_id"] = "former-group"
+    assert dashboard_series(hass)["groups"] == {}
+    assert await hass.config_entries.async_unload(second.entry_id)
+    assert second.entry_id not in dashboard_series(hass)["devices"]
 
 
 async def post(client, url, data):

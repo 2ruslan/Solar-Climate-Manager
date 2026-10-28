@@ -592,6 +592,7 @@ class GroupManager:
         registry = self.repository.registry
         member = registry.membership(device_id) if registry else None
         data: dict[str, Any] = {
+            "group_id": member.group_id if member else None,
             "group_name": None,
             "group_available_power": None,
             "group_load_power": None,

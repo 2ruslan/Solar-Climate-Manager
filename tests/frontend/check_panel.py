@@ -39,7 +39,7 @@ window.hass={language:'uk',user:{is_admin:true},connection:{},states:{
  'sensor.room':{entity_id:'sensor.room',attributes:{friendly_name:'Кімната'}},
  'climate.test':{entity_id:'climate.test',attributes:{friendly_name:'Вітальня'}}
 },
- callWS:async msg=>{if(window.offline)throw Error('offline');if(msg.type==='solar_climate_manager/history')return structuredClone(historyFixture);return {...structuredClone(fixture.overview),translations:fixture.labels[msg.language]};},
+ callWS:async msg=>{if(window.offline)throw Error('offline');if(msg.type==='solar_climate_manager/history')return structuredClone(historyFixture);if(msg.type==='solar_climate_manager/dashboard')return {generated_at:historyNow,groups:Object.fromEntries(fixture.overview.groups.map(g=>[g.group_id,historyFixture.rows])),devices:Object.fromEntries(fixture.overview.devices.map(d=>[d.entry_id,historyFixture.rows]))};return {...structuredClone(fixture.overview),translations:fixture.labels[msg.language]};},
  callService:async (...args)=>{calls.push(['service',...args]);},
  callApi:async(method,path,data)=>{
   calls.push([method,path,data]);
@@ -97,8 +97,41 @@ def main():
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(f"http://127.0.0.1:{server.server_port}")
             expect(page.get_by_role("heading", name="Будинок")).to_be_visible()
+            expect(page.get_by_role("tab", name="Огляд", exact=True)).to_have_attribute("aria-selected", "true")
+            expect(page.locator(".energy-tile")).to_have_count(5)
+            expect(page.locator(".dashboard-charts svg")).to_have_count(3)
+            page.get_by_role("button", name="Збільшити цільову температуру", exact=True).first.click()
+            expect(page.locator("#notice")).to_contain_text("Зміни збережено")
+            assert page.evaluate("""()=>{
+              const saved=calls.filter(c=>c[0]==='POST' && c[2]?.comfort).at(-1)[2];
+              const section=fixture.forms.energy.data_schema.find(f=>f.name==='comfort');
+              const field=section.schema.find(f=>f.name==='target_temperature');
+              return saved.comfort.target_temperature===Number(field.default ?? field.description?.suggested_value)+(field.selector.number.step || .5)
+                && !calls.some(c=>c[0]==='service');
+            }""")
+            page.get_by_role("button", name="6 год", exact=True).click()
+            expect(page.get_by_role("button", name="6 год", exact=True)).to_have_attribute("aria-pressed", "true")
+            page.get_by_role("button", name="12 год", exact=True).click()
+            page.screenshot(path="/tmp/scm-dashboard-desktop.png", full_page=True)
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
+            page.screenshot(path="/tmp/scm-dashboard-mobile.png", full_page=True)
+            page.set_viewport_size({"width": 1280, "height": 1080})
+            page.evaluate("panel.style.cssText='--primary-background-color:#111;--secondary-background-color:#252525;--card-background-color:#1c1c1c;--primary-text-color:#eee;--secondary-text-color:#aaa;--divider-color:#444;--primary-color:#03a9f4'")
+            page.screenshot(path="/tmp/scm-dashboard-dark.png", full_page=True)
+            page.locator(".dashboard-devices").screenshot(path="/tmp/scm-dashboard-devices.png")
+            page.evaluate("panel.style.cssText=''")
+            segments = page.evaluate("""async()=>{
+                const {chartSegments,gridIntervals}=await import('/panel.js');
+                const rows=[{timestamp:0,state:{temperature:20,grid_available:true}},
+                  {timestamp:60,state:{temperature:21,grid_available:false}},
+                  {timestamp:600,state:{temperature:null}},{timestamp:660,state:{temperature:22}}];
+                return [chartSegments(rows,'temperature',0,700),gridIntervals(rows,0,700)];
+            }""")
+            assert segments[0] == [[[0, 20], [60, 21]], [[660, 22]]]
+            assert segments[1] == [{"start": 0, "end": 60, "available": True}, {"start": 60, "end": 150, "available": False}]
+            page.get_by_role("tab", name="Аналітика", exact=True).click()
             analysis = page.locator(".power-analysis").first
-            analysis.locator("summary").click()
             expect(analysis).to_contain_text("Лише аналіз")
             expect(analysis).to_contain_text("Помірна")
             expect(analysis.locator("tbody")).to_contain_text("21 → 24 °C")
@@ -110,7 +143,7 @@ def main():
             analysis.screenshot(path="/tmp/scm-analysis-mobile.png")
             page.set_viewport_size({"width": 1280, "height": 1080})
             analysis.screenshot(path="/tmp/scm-analysis-desktop.png")
-            analysis.locator("summary").click()
+            page.get_by_role("tab", name="Налаштування", exact=True).click()
             page.get_by_role("button", name="Історія та діагностика", exact=True).first.click()
             expect(page.get_by_role("heading", name="Статистика за 12 годин")).to_be_visible()
             expect(page.locator(".history-stats")).to_contain_text("12.00 год")

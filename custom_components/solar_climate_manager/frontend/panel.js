@@ -74,6 +74,28 @@ const TEXT = {
 
 export const fieldDefault = (field) => field.description?.suggested_value ?? field.default;
 export const fieldKind = (field) => Object.keys(field.selector || {})[0] || field.type;
+export function chartSegments(rows,key,start,end) {
+  const result=[];let segment=[];let previous=null;
+  for(const row of rows) {
+    if(row.timestamp<start || row.timestamp>end)continue;
+    const value=row.state?.[key];
+    if(!Number.isFinite(value) || previous!==null && row.timestamp-previous>90) {
+      if(segment.length)result.push(segment);segment=[];
+    }
+    if(Number.isFinite(value))segment.push([row.timestamp,value]);
+    previous=row.timestamp;
+  }
+  if(segment.length)result.push(segment);
+  return result;
+}
+export function gridIntervals(rows,start,end) {
+  return rows.flatMap((r,i)=>{
+    const until=Math.min(end,rows[i+1]?.timestamp ?? end,r.timestamp+90);
+    const from=Math.max(start,r.timestamp);
+    return typeof r.state?.grid_available==="boolean" && until>from && r.timestamp<=end?
+      [{start:from,end:until,available:r.state.grid_available}]:[];
+  });
+}
 export function historySummary(input, now) {
   const start=now-12*3600;
   const all=input.filter(r=>Number.isFinite(r.timestamp) && r.timestamp<=now).slice().sort((a,b)=>a.timestamp-b.timestamp);
@@ -132,6 +154,25 @@ function el(tag, text, cls) {
 }
 
 const STYLE = `
+  .dashboard-tabs { display:flex; gap:8px; border-bottom:1px solid var(--divider-color,#dce5df); margin-bottom:24px; padding-bottom:10px; }
+  .dashboard-tabs [aria-selected=true],.periods [aria-pressed=true] { color:var(--primary-color,#03a9f4); border-color:var(--primary-color,#03a9f4); }
+  .energy-tiles { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin:18px 0; }
+  .energy-tile,.chart-card,.dashboard-devices>.device { border:1px solid var(--divider-color,#dce5df); border-radius:12px; padding:16px; min-width:0; background:var(--card-background-color,#fff); }
+  .energy-tile strong { display:block; font-size:25px; margin:12px 0 8px; }
+  .tile-label { font-size:14px; display:flex; align-items:center; gap:8px; }.tile-label ha-icon { width:22px; height:22px; }
+  .dashboard-charts { display:grid; grid-template-columns:1.4fr 1fr; gap:16px; margin-bottom:22px; }
+  .dashboard-devices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:16px; }
+  .dashboard-devices .values strong { font-size:24px; }.dashboard-devices .reason { padding:10px; background:var(--secondary-background-color,#eff5f1); border-radius:8px; }
+  .dashboard-group { margin-bottom:32px; }.periods { display:flex; gap:4px; flex-wrap:wrap; }
+  .chart { width:100%; display:block; color:var(--secondary-text-color,#61756b); touch-action:pan-y; }
+  .chart-legend { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; margin:12px 0 4px; }.chart-legend span { display:flex; align-items:center; gap:6px; }
+  .chart-legend i { width:18px; height:0; border-top:3px solid; }.chart-readout { min-height:36px; font-size:12px; color:var(--secondary-text-color,#61756b); }
+  .target-stepper { display:flex; align-items:center; gap:8px; }.target-stepper button { min-width:40px; }.target-stepper strong { min-width:64px; text-align:center; }
+  .dashboard-devices .actions { margin-top:12px; }.dashboard-devices .mode { min-width:0; max-width:100%; }
+  .grid-key { display:flex; gap:12px; font-size:12px; flex-wrap:wrap; }.grid-key span { padding-left:8px; border-left:8px solid; }
+  main { max-width:1600px !important; }
+  @media(max-width:1100px) { .energy-tiles { grid-template-columns:repeat(3,minmax(0,1fr)); }.dashboard-charts { grid-template-columns:1fr; } }
+  @media(max-width:700px) { .energy-tiles { grid-template-columns:repeat(2,minmax(0,1fr)); }.dashboard-devices { grid-template-columns:1fr; }.energy-tile strong { font-size:22px; }.dashboard-tabs button { padding:9px; }.dashboard-group>.heading { align-items:flex-start; }.chart-card { padding:10px; }.dashboard-devices .values { gap:8px; }.dashboard-devices .values strong { font-size:20px; } }
   .inline-settings { margin-top:12px; border:1px solid var(--divider-color,#dce5df); border-radius:10px; }
   .inline-settings>summary { padding:14px 16px; cursor:pointer; font-weight:600; }
   .inline-body { padding:0 16px; max-width:900px; }
@@ -165,6 +206,7 @@ export class SolarClimatePanel extends HTMLElement {
     this._flow = null;
     this._inlineEditors = new Set();
     this._analysisOpen = new Set();
+    this._tab="overview";this._hours=12;this._charts=null;this._chartFetched=0;this._quickBusy=false;
     this._fieldId = 0;
     this._visibility = () => { if (!document.hidden) this.refresh(); };
   }
@@ -250,10 +292,18 @@ export class SolarClimatePanel extends HTMLElement {
       if (!this.isConnected) return;
       if (data.translations) { this._labels=data.translations; delete data.translations; }
       this._data=data;
+      if(Date.now()-this._chartFetched>60000 || !this._charts) {
+        try {
+          this._charts=await this._hass.callWS({type:"solar_climate_manager/dashboard"});
+          this._chartError=false;this._signature=null;
+        } catch {this._chartError=true;this._signature=null;}
+        this._chartFetched=Date.now();
+      }
+      if(!this.isConnected)return;
       this._status.textContent=data.error ? this.errorText(data.error) : "";
       const signature=JSON.stringify(data);
       const focused=this.shadowRoot.activeElement;
-      if (signature !== this._signature && !this._inlineEditors.size && !["INPUT","SELECT"].includes(focused?.tagName)) {
+      if (signature !== this._signature && !this._quickBusy && !this._inlineEditors.size && !["INPUT","SELECT"].includes(focused?.tagName)) {
         this._signature=signature; this._renderOverview();
       }
     } catch (error) { this._status.textContent=error.code === "unauthorized" ? this.t("admin") : this.t("lost"); }
@@ -269,12 +319,18 @@ export class SolarClimatePanel extends HTMLElement {
     }
     const actions=el("div",null,"actions");
     const create=this.button(this.t("create"),()=>this.chooseDevice("group_create"),"primary"); create.disabled=!!data.error;
-    actions.append(create,this.button(this.t("add"),()=>this.startFlow(null,"user")),this.button(this.t("refresh"),()=>{this._signature=null;this.refresh();}));
+    actions.append(create,this.button(this.t("add"),()=>this.startFlow(null,"user")),this.button(this.t("refresh"),()=>{this._signature=null;this._chartFetched=0;this.refresh();}));
     toolbar.append(stats,actions); content.append(toolbar);
+    const tabs=el("nav",null,"dashboard-tabs");tabs.setAttribute("role","tablist");
+    for(const [id,uk,en] of [["overview","Огляд","Overview"],["analysis","Аналітика","Analytics"],["settings","Налаштування","Settings"]]) {
+      const button=this.button(this._lang==="uk"?uk:en,()=>this.selectTab(id));
+      button.setAttribute("role","tab");button.setAttribute("aria-selected",String(this._tab===id));tabs.append(button);
+    }
+    content.append(tabs);
     content.append(el("p",this.t("preview"),"subtle"));
     if (!data.devices.length) content.append(el("div",this.t("noDevices"),"empty"));
     if (!data.groups.length) content.append(el("div",this.t("noGroups"),"empty"));
-    for (const group of data.groups) content.append(this.groupCard(group));
+    for (const group of data.groups) content.append(this._tab==="settings"?this.groupCard(group):this.dashboardGroup(group));
     const independent=data.devices.filter(d=>!d.group_id);
     const section=el("section",null,"section"); section.append(el("h2",this.t("independent")));
     if (!independent.length) section.append(el("p",this.t("noIndependent"),"subtle"));
@@ -284,6 +340,154 @@ export class SolarClimatePanel extends HTMLElement {
     const link=el("a",this.t("integration")); link.href="/config/integrations/integration/solar_climate_manager";
     footer.append(link,el("span",` · ${data.version}`)); content.append(footer);
     this._overview.replaceChildren(content);
+  }
+  selectTab(tab,deviceId=null) {
+    if(this._inlineEditors.size || this._quickBusy) {
+      this._notice.textContent=this._lang==="uk"?"Спочатку збережіть або закрийте відкриті налаштування.":"Save or close the open settings first.";return;
+    }
+    this._tab=tab;this._renderOverview();
+    if(deviceId)Array.from(this.shadowRoot.querySelectorAll("[data-device-id]")).find(n=>n.dataset.deviceId===deviceId)?.scrollIntoView({block:"start"});
+  }
+  temperature(value) {return Number.isFinite(value)?`${value.toLocaleString(this._lang,{minimumFractionDigits:1,maximumFractionDigits:1})} °C`:this.t("missing");}
+  dashboardGroup(group) {
+    const uk=this._lang==="uk",card=el("section",null,"dashboard-group");
+    const heading=el("div",null,"heading");heading.append(el("h2",group.name));
+    const periods=el("div",null,"periods");
+    for(const hours of [1,6,12,24]) {
+      const button=this.button(`${hours} ${uk?"год":"h"}`,()=>{this._hours=hours;this._renderOverview();});
+      button.setAttribute("aria-pressed",String(this._hours===hours));periods.append(button);
+    }
+    heading.append(periods);card.append(heading);
+    const tiles=el("div",null,"energy-tiles");
+    const grid=group.grid_available===true?(uk?"Є живлення":"Connected"):group.grid_available===false?(uk?"Немає мережі":"Disconnected"):this.t("missing");
+    const battery=Number.isFinite(group.battery_power)?`${group.battery_power<0?(uk?"Заряджання":"Charging"):(uk?"Розряджання":"Discharging")} ${this.watts(Math.abs(group.battery_power))}`:this.t("missing");
+    const items=[
+      ["mdi:white-balance-sunny",uk?"Сонячна генерація":"Solar generation",this.watts(group.pv_power),`${uk?"Прогноз зараз":"Forecast now"}: ${this.watts(group.generation_forecast)}`,"#e9b331"],
+      ["mdi:home-lightning-bolt",uk?"Навантаження групи":"Group load",this.watts(group.load_power),this.t("availableHint"),"#03a9f4"],
+      ["mdi:battery",uk?"Батарея":"Battery",Number.isFinite(group.soc)?`${group.soc} %`:this.t("missing"),battery,"#48b979"],
+      ["mdi:transmission-tower",uk?"Мережа":"Grid",grid,`${uk?"Імпорт (+) / експорт (−)":"Import (+) / export (−)"}: ${this.watts(group.grid_power)} · ${uk?"Ліміт":"Limit"}: ${group.unlimited?this.t("unlimited"):this.watts(group.grid_import_limit)}`,"#48b979"],
+      ["mdi:lightning-bolt",uk?"Доступно групі":"Group headroom",group.unlimited?this.t("unlimited"):this.watts(group.available_power),`${this.t("reserve")}: ${this.watts(group.reserved_power)}`,"#03a9f4"],
+    ];
+    for(const [icon,title,value,note,color] of items) {
+      const tile=el("div",null,"energy-tile"),label=el("div",null,"tile-label"),symbol=el("ha-icon");symbol.setAttribute("icon",icon);label.style.color=color;label.append(symbol,el("span",title));
+      tile.append(label,el("strong",value),el("div",note,"subtle"));tiles.append(tile);
+    }
+    card.append(tiles);
+    const rows=this._charts?.groups?.[group.group_id] || [];
+    const charts=el("div",null,"dashboard-charts");
+    charts.append(this.lineChart(uk?"Генерація та споживання":"Generation and consumption",rows,[["pv_power",uk?"Сонце":"Solar","#e9b331"],["generation_forecast",uk?"Прогноз":"Forecast","#f39a39",true],["load_power",uk?"Будинок":"House","#03a9f4"]],"kW",.001));
+    const batteryCard=this.lineChart(uk?"Батарея та мережа":"Battery and grid",rows,[["soc",uk?"Заряд батареї":"Battery charge","#48b979"]],"%");
+    batteryCard.append(this.gridChart(rows));charts.append(batteryCard);card.append(charts);
+    if(this._chartError)card.append(el("p",uk?"Не вдалося оновити графіки. Попередні дані можуть бути застарілими.":"Charts could not refresh. Previous data may be stale.","error"));
+    card.append(el("p",uk?"Історія до 24 год; після перезапуску HA або reload збирається заново. Розриви означають відсутність даних.":"Up to 24h of history; collection restarts after HA restart or reload. Gaps indicate missing data.","subtle"));
+    card.append(el("h3",this.t("devices")));
+    const members=el("div",null,"dashboard-devices");
+    for(const member of group.members) {
+      const device=this._data.devices.find(d=>d.device_id===member.device_id);
+      members.append(device?this.dashboardDevice(device):el("div",this.t("unavailable"),"device"));
+    }
+    if(!group.members.length)members.append(el("p",this.t("noMembers")));
+    card.append(members);return card;
+  }
+  chartWindow() {
+    const end=this._charts?.generated_at || Date.now()/1000;
+    return {start:end-this._hours*3600,end};
+  }
+  svgNode(tag,attrs={},text=null) {
+    const node=document.createElementNS("http://www.w3.org/2000/svg",tag);
+    for(const [k,v] of Object.entries(attrs))node.setAttribute(k,String(v));
+    if(text!==null)node.textContent=text;return node;
+  }
+  lineChart(title,rows,fields,unit,scale=1) {
+    const card=el("section",null,"chart-card");card.append(el("h3",title));
+    const {start,end}=this.chartWindow(),legend=el("div",null,"chart-legend");
+    const series=fields.map(([key,label,color,dashed])=>{
+      const item=el("span"),line=el("i");line.style.borderColor=color;if(dashed)line.style.borderTopStyle="dashed";item.append(line,el("span",label));legend.append(item);
+      return {key,color,dashed,segments:chartSegments(rows,key,start,end)};
+    });
+    card.append(legend);
+    const values=series.flatMap(s=>s.segments.flatMap(segment=>segment.map(p=>p[1]*scale)));
+    if(!values.length) {card.append(el("p",this.t("historyEmpty"),"empty"));return card;}
+    let min=unit==="kW"?0:Math.floor(Math.min(...values)-1),max=Math.ceil(Math.max(...values)+(unit==="kW"?.2:1));
+    if(unit==="%") {min=Math.max(0,min);max=Math.min(100,max);}if(max<=min)max=min+1;
+    const x=t=>48+(t-start)/(end-start)*652,y=v=>180-(v*scale-min)/(max-min)*152;
+    const svg=this.svgNode("svg",{viewBox:"0 0 720 220",class:"chart",role:"img","aria-label":title});
+    for(let i=0;i<=4;i++) {
+      const py=28+i*38,value=max-(max-min)*i/4;
+      svg.append(this.svgNode("line",{x1:48,x2:700,y1:py,y2:py,stroke:"currentColor",opacity:.18}),this.svgNode("text",{x:43,y:py+4,"text-anchor":"end",fill:"currentColor","font-size":12},value.toLocaleString(this._lang,{maximumFractionDigits:1})));
+    }
+    for(let i=0;i<=4;i++) {
+      const time=start+(end-start)*i/4,px=x(time);
+      svg.append(this.svgNode("line",{x1:px,x2:px,y1:28,y2:180,stroke:"currentColor",opacity:.1}),this.svgNode("text",{x:px,y:205,"text-anchor":i===0?"start":i===4?"end":"middle",fill:"currentColor","font-size":12},new Date(time*1000).toLocaleTimeString(this._lang,{hour:"2-digit",minute:"2-digit"})));
+    }
+    svg.append(this.svgNode("text",{x:5,y:14,fill:"currentColor","font-size":12},unit));
+    for(const s of series)for(const segment of s.segments) {
+      if(segment.length===1)svg.append(this.svgNode("circle",{cx:x(segment[0][0]),cy:y(segment[0][1]),r:3,fill:s.color}));
+      else svg.append(this.svgNode("path",{d:segment.map(([t,v],i)=>`${i?"L":"M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(" "),stroke:s.color,"stroke-width":2.5,fill:"none","stroke-dasharray":s.dashed?"7 5":"none"}));
+    }
+    const readout=el("div",`${this._hours} ${this.t("hours")} · ${this.t("lastUpdate")}: ${new Date(end*1000).toLocaleTimeString(this._lang)}`,"chart-readout");
+    svg.addEventListener("pointermove",event=>{
+      const box=svg.getBoundingClientRect(),time=start+(((event.clientX-box.left)/box.width*720-48)/652)*(end-start);
+      const row=rows.reduce((best,r)=>r.timestamp>=start && r.timestamp<=end && (!best || Math.abs(r.timestamp-time)<Math.abs(best.timestamp-time))?r:best,null);
+      if(!row || Math.abs(row.timestamp-time)>90){readout.textContent=this.t("missing");return;}
+      readout.textContent=`${new Date(row.timestamp*1000).toLocaleTimeString(this._lang)} · `+fields.map(([key,label])=>`${label}: ${Number.isFinite(row.state[key])?(row.state[key]*scale).toLocaleString(this._lang,{maximumFractionDigits:2})+" "+unit:this.t("missing")}`).join(" · ");
+    });
+    card.append(svg,readout);return card;
+  }
+  gridChart(rows) {
+    const {start,end}=this.chartWindow(),box=el("div"),uk=this._lang==="uk";
+    const svg=this.svgNode("svg",{viewBox:"0 0 720 24",class:"chart",role:"img","aria-label":uk?"Історія наявності мережі":"Grid availability history"});
+    svg.append(this.svgNode("rect",{x:48,y:4,width:652,height:14,fill:"var(--divider-color,#777)"}));
+    for(const interval of gridIntervals(rows,start,end))svg.append(this.svgNode("rect",{x:48+(interval.start-start)/(end-start)*652,y:4,width:(interval.end-interval.start)/(end-start)*652,height:14,fill:interval.available?"#48b979":"#e9b331"}));
+    const key=el("div",null,"grid-key");
+    for(const [text,color] of [[uk?"Є мережа":"Connected","#48b979"],[uk?"Відсутня":"Disconnected","#e9b331"],[this.t("missing"),"#777"]]){const item=el("span",text);item.style.borderColor=color;key.append(item);}
+    box.append(svg,key);return box;
+  }
+  dashboardDevice(device) {
+    const uk=this._lang==="uk",card=el("article",null,"device");card.dataset.deviceId=device.device_id;
+    const top=el("div",null,"device-top"),title=el("div",null,"grow");title.append(el("h3",device.name));
+    const state=!device.loaded?this.t("unavailable"):device.hvac_state==="heat"?(uk?"Нагрівання":"Heating"):device.hvac_state==="cool"?(uk?"Охолодження":"Cooling"):device.running===false?this.t("off"):this.t("missing");
+    top.append(title,el("span",state,"badge"));card.append(top);
+    const analysis=device.power_analysis,measured=Number.isFinite(device.measured_power),estimated=device.running && Number.isFinite(analysis?.watts);
+    const power=measured?this.watts(device.measured_power):device.running===false?this.t("off"):this.watts(estimated?analysis.watts:device.planned_power);
+    const values=el("div",null,"values");
+    for(const [label,value] of [[uk?"У кімнаті":"Room",this.temperature(device.temperature)],[uk?"Задано":"Target",this.temperature(device.target)],[measured?this.t("measured"):estimated?(uk?"Потужність · оцінка":"Power · estimate"):this.t("estimated"),power]]){const item=el("div");item.append(el("div",label,"subtle"),el("strong",value));values.append(item);}
+    card.append(values,el("p",`${uk?"Датчик AC":"AC sensor"}: ${this.temperature(device.ac_temperature)} → ${uk?"уставка AC":"AC setpoint"}: ${this.temperature(device.ac_set_temperature)}`,"subtle"));
+    card.append(this.lineChart(uk?"Температура кімнати":"Room temperature",this._charts?.devices?.[device.entry_id] || [],[["temperature",uk?"Кімната":"Room","#03a9f4"],["target_temperature",uk?"Задана":"Target","#e9b331",true]],"°C"));
+    card.append(el("p",`${this.stateText("group_action",device.action)} · ${this.stateText("group_reason",device.reason)}`,"reason"));
+    const actions=el("div",null,"actions"),mode=el("select",null,"mode");mode.setAttribute("aria-label",`${this.t("mode")}: ${device.name}`);
+    for(const value of ["disabled","observation","control","temporary_block"]){const o=el("option",this.stateText("operation_mode",value));o.value=value;mode.append(o);}mode.value=device.mode;mode.disabled=!device.loaded || !device.mode_entity;
+    mode.addEventListener("change",async()=>{mode.disabled=true;try{await this._hass.callService("select","select_option",{entity_id:device.mode_entity,option:mode.value});}catch{this._notice.textContent=this.t("failed");}finally{mode.blur();this._signature=null;await this.refresh();}});
+    const target=el("div",null,"target-stepper");
+    const down=this.button("−",()=>this.quickTarget(device,-1)),up=this.button("+",()=>this.quickTarget(device,1));
+    down.setAttribute("aria-label",uk?"Зменшити цільову температуру":"Decrease target temperature");up.setAttribute("aria-label",uk?"Збільшити цільову температуру":"Increase target temperature");down.disabled=up.disabled=!device.loaded || !!device.edit_block || this._quickBusy;
+    target.append(down,el("strong",this.temperature(device.target)),up);actions.append(mode,target,el("span",`${uk?"Вентилятор":"Fan"}: ${device.fan_mode || "—"}`,"badge"));
+    actions.append(this.button(this.t("settings"),()=>this.selectTab("settings",device.device_id)));
+    const history=this.button(this.t("history"),()=>this.showHistory(device));history.disabled=!device.loaded;actions.append(history);card.append(actions);
+    if(device.command_status && device.command_status!=="idle")card.append(el("p",this.stateText("group_command_status",device.command_status),"subtle"));
+    if(this._tab==="analysis" && analysis) {const details=this.analysisCard(analysis,device.device_id);details.open=true;card.append(details);}else card.append(this.button(uk?"Аналіз потужності":"Power analysis",()=>this.selectTab("analysis",device.device_id)));
+    return card;
+  }
+  async quickTarget(device,direction) {
+    if(this._quickBusy || this._inlineEditors.size || device.edit_block)return;
+    this._quickBusy=true;this._renderOverview();
+    const base="config/config_entries/options/flow";let flow=null;
+    try {
+      flow=await this._hass.callApi("POST",base,{handler:device.entry_id});
+      const input=formDefaults(flow.data_schema || []),comfort=flow.data_schema?.find(f=>f.name==="comfort");
+      const field=comfort?.schema?.find(f=>f.name==="target_temperature"),spec=field?.selector?.number;
+      if(!spec || !Number.isFinite(input.comfort?.target_temperature))throw Error("unsupported");
+      const value=Number((input.comfort.target_temperature+direction*(spec.step || .5)).toFixed(2));
+      if(spec.min!==undefined && value<spec.min || spec.max!==undefined && value>spec.max)throw Error("bounds");
+      input.comfort.target_temperature=value;
+      const result=await this._hass.callApi("POST",`${base}/${flow.flow_id}`,input);
+      if(result.type!=="create_entry")throw Error(result.errors?.base || result.reason || "failed");
+      flow=null;this._notice.textContent=this.t("saved");
+    } catch {this._notice.textContent=this.t("failed");}
+    finally {
+      if(flow?.flow_id)try{await this._hass.callApi("DELETE",`${base}/${flow.flow_id}`);}catch{ /* best-effort cancellation */ }
+      this._quickBusy=false;this._signature=null;await this.refresh();this._renderOverview();
+    }
   }
   groupCard(group) {
     const card=el("section",null,"group");
@@ -322,6 +526,7 @@ export class SolarClimatePanel extends HTMLElement {
   }
   deviceCard(device) {
     const card=el("article",null,"device");
+    card.dataset.deviceId=device.device_id;
     const top=el("div",null,"device-top"); const title=el("div",null,"grow");
     title.append(el("h3",device.name),el("div",device.climate_entity,"subtle"));
     top.append(title,el("span",!device.loaded?this.t("unavailable"):device.running===null?this.t("missing"):this.t(device.running?"on":"off"),"badge"));

@@ -50,6 +50,7 @@ async def async_setup_panel_api(hass):
     }
     websocket_api.async_register_command(hass, websocket_overview)
     websocket_api.async_register_command(hass, websocket_history)
+    websocket_api.async_register_command(hass, websocket_dashboard)
 
 
 async def async_show_panel(hass):
@@ -117,6 +118,10 @@ async def async_overview(hass):
             "priority": member.priority if member else 0,
             "mode": settings["operation_mode"], "mode_entity": mode_entity,
             "temperature": data.get("temperature"), "target": settings["target_temperature"],
+            "ac_temperature": data.get("ac_temperature"),
+            "ac_set_temperature": data.get("ac_set_temperature"),
+            "hvac_state": climate.state if climate else None,
+            "fan_mode": climate.attributes.get("fan_mode") if climate else None,
             "running": data.get("running") if loaded else None,
             "power_accounting": policy.power_accounting,
             "planned_power": learning["effective_watts"]
@@ -137,7 +142,15 @@ async def async_overview(hass):
             sample = next((d for d in devices if d["group_id"] == group.group_id and d["loaded"]), None)
             public = manager.public_state(manager.devices[sample["device_id"]]) if manager and sample and sample["device_id"] in manager.devices else {}
             snapshot = manager.snapshots.get(group.group_id) if manager else None
+            energy = snapshot.energy if snapshot and sample else None
             groups.append({
+                "pv_power": energy.pv if energy else None,
+                "generation_forecast": energy.generation_forecast if energy else None,
+                "soc": energy.soc if energy else None,
+                "battery_power": energy.battery if energy else None,
+                "grid_available": energy.grid if energy else None,
+                "grid_power": energy.grid_power if energy else None,
+                "grid_import_limit": energy.grid_import_limit if energy else None,
                 "background_analysis": manager.power_analysis.background_view(group.group_id)
                 if manager else None,
                 "group_id": group.group_id, "name": group.name,
@@ -151,6 +164,40 @@ async def async_overview(hass):
                 "has_reservations": any(r.group_id == group.group_id for r in registry.unresolved),
             })
     return {"version": VERSION, "devices": devices, "groups": groups, "error": error}
+
+
+def dashboard_series(hass):
+    """One bounded read for every chart; never mix former group memberships."""
+    now = dt_util.utcnow().timestamp()
+    devices, groups = {}, {}
+    manager = hass.data.get(f"{DOMAIN}.group_manager")
+    registry = manager.repository.registry if manager else None
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        coordinator = getattr(entry, "runtime_data", None)
+        if entry.state is not ConfigEntryState.LOADED or not coordinator or coordinator.commands.closed:
+            continue
+        rows = coordinator.history.read(now)
+        devices[entry.entry_id] = [
+            {"timestamp": r["timestamp"], "state": {k: r["state"].get(k) for k in
+             ("temperature", "target_temperature")}} for r in rows]
+        member = registry.membership(coordinator.device_id) if registry else None
+        if member:
+            shared = [r for r in rows if r["state"].get("group_id") == member.group_id]
+            projected = [{"timestamp": r["timestamp"], "state": {k: r["state"].get(k) for k in
+                          ("pv_power", "generation_forecast", "load_power", "soc", "grid_available")}}
+                         for r in shared]
+            # One shared meter series, from the member with the longest history.
+            previous = groups.get(member.group_id, [])
+            if projected and (not previous or projected[0]["timestamp"] < previous[0]["timestamp"]):
+                groups[member.group_id] = projected
+    return {"generated_at": now, "devices": devices, "groups": groups}
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/dashboard"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_dashboard(hass, connection, msg):
+    connection.send_result(msg["id"], dashboard_series(hass))
 
 
 @websocket_api.websocket_command({

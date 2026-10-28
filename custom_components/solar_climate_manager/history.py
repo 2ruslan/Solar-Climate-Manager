@@ -9,6 +9,7 @@ SAMPLE_INTERVAL = 60
 MAX_SAMPLES = MAX_AGE // SAMPLE_INTERVAL + 1
 MAX_EVENTS = MAX_ROWS - MAX_SAMPLES - 1
 EVENT_KEYS = (
+    "group_id",
     "running", "automation_mode", "control_allowed", "manual_pause", "demand",
     "strategy_action", "strategy_reason", "group_action", "group_reason",
     "group_command_status", "command_error", "command_failed", "grid_available",
