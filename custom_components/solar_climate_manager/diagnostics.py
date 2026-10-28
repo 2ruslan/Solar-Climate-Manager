@@ -16,6 +16,12 @@ async def async_get_config_entry_diagnostics(hass, entry):
         if observation is not None:
             data["group_observation"] = observation
     if coordinator.group_manager is not None:
+        manager = coordinator.group_manager
+        registry = manager.repository.registry
+        member = registry.membership(coordinator.device_id) if registry else None
+        if member:
+            data["power_analysis"] = manager.power_analysis.view(member.group_id, coordinator)
+            data["background_analysis"] = manager.power_analysis.background_view(member.group_id)
         control = coordinator.group_manager.diagnostics(coordinator.device_id)
         if control is not None:
             data["group_control"] = control

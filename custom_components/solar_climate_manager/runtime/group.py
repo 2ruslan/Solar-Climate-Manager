@@ -27,6 +27,7 @@ from ..domain.allocator import (
 from ..domain.groups import GroupConfig, GroupRegistry, MemberPolicy, UnresolvedReservation
 from ..group_presentation import group_metrics
 from ..manual import control_fingerprint, pause_active
+from .power_analysis import PowerAnalysis
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class DispatchTicket:
 class GroupManager:
     def __init__(self, hass: Any) -> None:
         self.hass = hass
+        self.power_analysis = PowerAnalysis(hass)
         self.repository = get_group_repository(hass)
         self.devices: dict[str, Any] = {}
         self.states: dict[str, AllocationState] = {}
@@ -66,6 +68,7 @@ class GroupManager:
         coordinator.group_manager = self
         coordinator.commands.authority = self
         coordinator.commands.device_id = coordinator.device_id
+        await self.power_analysis.async_load()
         try:
             await self.repository.async_load()
         except (ValueError, OSError, HomeAssistantError):
@@ -115,6 +118,7 @@ class GroupManager:
             self.configs.clear()
             self.snapshots.clear()
             self.results.clear()
+            await self.power_analysis.async_flush()
         else:
             self.request_evaluation()
 
@@ -345,6 +349,12 @@ class GroupManager:
                             if actual is not None:
                                 self._observe_learning(actual, current)
                                 self._compute(actual, current)
+                                try:
+                                    self.power_analysis.observe(actual, current, self.devices,
+                                                                self.snapshots[actual.group_id])
+                                except (ValueError, OSError, HomeAssistantError):
+                                    self.power_analysis.error = "analysis_error"
+                                    LOGGER.exception("Power analysis failed; control is unaffected")
                         except (ValueError, OSError, HomeAssistantError):
                             self.error = "group_storage_error"
                             LOGGER.exception("Group evaluation or persistence failed")

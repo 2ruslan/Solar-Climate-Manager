@@ -122,6 +122,8 @@ async def async_overview(hass):
             "planned_power": learning["effective_watts"]
             if learning and policy.power_accounting == "estimated" else policy.planned_watts,
             "learning": learning,
+            "power_analysis": manager.power_analysis.view(member.group_id, coordinator)
+            if manager and member and loaded else None,
             "measured_power": data.get("ac_power") if policy.power_accounting != "estimated" else None,
             "action": data.get("group_action"),
             "reason": data.get("group_reason"),
@@ -136,6 +138,8 @@ async def async_overview(hass):
             public = manager.public_state(manager.devices[sample["device_id"]]) if manager and sample and sample["device_id"] in manager.devices else {}
             snapshot = manager.snapshots.get(group.group_id) if manager else None
             groups.append({
+                "background_analysis": manager.power_analysis.background_view(group.group_id)
+                if manager else None,
                 "group_id": group.group_id, "name": group.name,
                 "members": [asdict(m) for m in members],
                 "available_power": public.get("group_available_power"),

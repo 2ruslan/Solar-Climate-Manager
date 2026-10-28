@@ -164,6 +164,7 @@ export class SolarClimatePanel extends HTMLElement {
     this._dialogBusy = false;
     this._flow = null;
     this._inlineEditors = new Set();
+    this._analysisOpen = new Set();
     this._fieldId = 0;
     this._visibility = () => { if (!document.hidden) this.refresh(); };
   }
@@ -289,6 +290,10 @@ export class SolarClimatePanel extends HTMLElement {
     const heading=el("div",null,"heading");
     heading.append(el("h2",group.name),el("span",`${group.members.length} · ${this.t("devices")}`,"badge"));
     card.append(heading);
+    if(group.background_analysis) {
+      const background=group.background_analysis;
+      card.append(el("p",`${this._lang==="uk"?"Фон будинку при вимкнених кондиціонерах (медіана доступних даних за 24 год)":"House background with ACs off (median of available 24h data)"}: ${this.watts(background.watts)} · ${background.samples}`,"subtle"));
+    }
     const metrics=el("div",null,"metrics");
     for (const [key,value] of [["load",this.watts(group.load_power)],["available",group.unlimited?this.t("unlimited"):this.watts(group.available_power)],["reserve",this.watts(group.reserved_power)]]) {
       const metric=el("div",null,"metric"); metric.append(el("div",this.t(key),"subtle"),el("strong",value)); metrics.append(metric);
@@ -328,6 +333,7 @@ export class SolarClimatePanel extends HTMLElement {
       const value=el("div"); value.append(el("div",this.t(key),"subtle"),el("strong",text)); values.append(value);
     }
     card.append(values);
+    if(device.power_analysis)card.append(this.analysisCard(device.power_analysis,device.device_id));
     if (device.learning?.enabled) {
       const learned=device.learning;
       card.append(el("p",`${this.t(learned.source)} · ${this.t(learned.confidence)} · ${this.t("samples")}: ${learned.samples}`,"subtle"));
@@ -681,6 +687,52 @@ export class SolarClimatePanel extends HTMLElement {
     }
     if(errors[field.name])label.append(el("span",this.errorText(errors[field.name]),"field-error error"));
     return label;
+  }
+  analysisCard(analysis,deviceId) {
+    const uk=this._lang==="uk";
+    const card=el("details",null,"power-analysis");
+    card.open=this._analysisOpen.has(deviceId);
+    card.addEventListener("toggle",()=>{if(card.isConnected){if(card.open)this._analysisOpen.add(deviceId);else this._analysisOpen.delete(deviceId);}});
+    card.append(el("summary",uk?"Аналіз потужності":"Power analysis"));
+    const statuses={
+      waiting_background:["Потрібен стабільний фон перед запуском","Waiting for a stable off baseline"],
+      ready:["Фон зібрано; очікування циклу","Baseline ready; waiting for a cycle"],
+      checking_background:["Перевірка фону після вимкнення","Checking the off baseline"],
+      collecting:["Збір профілю; очікування завершення циклу","Collecting; waiting for cycle completion"],
+      settling:["Стабілізація після зміни режиму","Settling after a setting change"],
+      multiple_running:["Кілька кондиціонерів працюють: внески неоднозначні","Multiple ACs running: contributions are ambiguous"],
+      invalid_data:["Недостатньо актуальних даних","Missing or stale data"],
+      data_gap:["Перерва в даних; потрібен новий цикл","Data gap; a new cycle is needed"],
+      background_changed:["Цикл відхилено: змінився фон будинку","Cycle rejected: house background changed"],
+      overlapping_cycle:["Цикл відхилено: перекриття запусків","Cycle rejected: overlapping starts"],
+      cycle_too_long:["Цикл понад 6 годин не використано","Cycle longer than 6 hours excluded"],
+      unsupported_load:["Потрібне навантаження, що включає всі кондиціонери","Load must include every AC"],
+      storage_error:["Сховище аналізу недоступне","Analysis storage unavailable"],
+      analysis_error:["Помилка аналізу; керування працює незалежно","Analysis error; control operates independently"],
+    };
+    card.append(el("p",uk?"Лише аналіз — не впливає на керування. Оцінка за лічильником будинку, не окреме вимірювання кондиціонера.":"Analysis only — does not affect control. Estimated from the house meter, not a dedicated AC measurement.","subtle"));
+    card.append(el("p",statuses[analysis.status]?.[uk?0:1] || analysis.status));
+    const confidence={insufficient:uk?"Недостатньо даних":"Insufficient data",low:uk?"Низька":"Low",moderate:uk?"Помірна":"Moderate"};
+    card.append(el("p",`${uk?"Оцінка для поточних умов":"Estimate for current conditions"}: ${this.watts(analysis.watts)} · ${uk?"Якість":"Quality"}: ${confidence[analysis.confidence] || analysis.confidence}`));
+    if(Number.isFinite(analysis.low))card.append(el("p",`${uk?"Діапазон спостережень (10–90%), не гарантія":"Observed range (10–90%), not a guarantee"}: ${this.watts(analysis.low)} – ${this.watts(analysis.high)}`));
+    card.append(el("p",`${uk?"Відповідних циклів / усього":"Matching / total cycles"}: ${analysis.matching_cycles} / ${analysis.cycles} · ${uk?"Відхилених циклів групи":"Rejected group cycles"}: ${analysis.rejected_cycles}`));
+    if(analysis.updated_at)card.append(el("p",`${this.t("lastUpdate")}: ${new Date(analysis.updated_at*1000).toLocaleString(this._lang)}`,"subtle"));
+    const conditions=analysis.conditions;
+    if(conditions)card.append(el("p",`${conditions.mode} · ${conditions.indoor} → ${conditions.target} °C · ${conditions.fan} · ${conditions.phase==="startup"?(uk?"Після запуску":"After startup"):(uk?"Усталена робота":"Steady operation")}`));
+    if(analysis.profiles?.length) {
+      const scroll=el("div",null,"history-scroll");
+      const table=el("table");const head=el("tr");
+      for(const title of uk?["Час","Режим / вентилятор","Температура AC → уставка","Зовні","Фаза","Оцінка"]:["Time","Mode / fan","AC temperature → setpoint","Outside","Phase","Estimate"])head.append(el("th",title));
+      const thead=el("thead");thead.append(head);table.append(thead);
+      const body=el("tbody");
+      for(const row of analysis.profiles.slice(-50).reverse()) {
+        const c=row.conditions;const tr=el("tr");
+        for(const value of [new Date(row.time*1000).toLocaleString(this._lang),`${c.mode} / ${c.fan}`,`${c.indoor} → ${c.target} °C`,c.outdoor===null?"—":`${c.outdoor} °C`,c.phase==="startup"?(uk?"Запуск":"Startup"):(uk?"Усталена":"Steady"),this.watts(row.watts)])tr.append(el("td",value));
+        body.append(tr);
+      }
+      table.append(body);scroll.append(table);card.append(scroll);
+    }
+    return card;
   }
   async submitFlow(input) {
     if(this._dialogBusy || !this._flow?.flow_id)return;

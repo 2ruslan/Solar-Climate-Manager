@@ -22,6 +22,8 @@ HTML = """<!doctype html><html><meta charset="utf-8">
 <script type="module">
 import '/panel.js';
 window.fixture=await (await fetch('/fixture')).json();
+const analysisDevice=fixture.overview.devices.find(d=>d.group_id);
+analysisDevice.power_analysis={status:'ready',watts:600,low:550,high:650,confidence:'moderate',matching_cycles:5,cycles:5,rejected_cycles:2,updated_at:1793023200,conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:5,phase:'steady'},profiles:[{time:1793023200,watts:600,conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:5,phase:'steady'}}]};
 window.calls=[];window.offline=false;window.failWrite=false;
 window.current=null;
 const historyNow=1793023200;
@@ -95,6 +97,20 @@ def main():
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(f"http://127.0.0.1:{server.server_port}")
             expect(page.get_by_role("heading", name="Будинок")).to_be_visible()
+            analysis = page.locator(".power-analysis").first
+            analysis.locator("summary").click()
+            expect(analysis).to_contain_text("Лише аналіз")
+            expect(analysis).to_contain_text("Помірна")
+            expect(analysis.locator("tbody")).to_contain_text("21 → 24 °C")
+            page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.matching_cycles=6;fixture.overview.devices.find(d=>d.group_id).power_analysis.cycles=6;panel.refresh()")
+            expect(analysis).to_contain_text("6 / 6")
+            expect(analysis.locator("tbody")).to_be_visible()
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
+            analysis.screenshot(path="/tmp/scm-analysis-mobile.png")
+            page.set_viewport_size({"width": 1280, "height": 1080})
+            analysis.screenshot(path="/tmp/scm-analysis-desktop.png")
+            analysis.locator("summary").click()
             page.get_by_role("button", name="Історія та діагностика", exact=True).first.click()
             expect(page.get_by_role("heading", name="Статистика за 12 годин")).to_be_visible()
             expect(page.locator(".history-stats")).to_contain_text("12.00 год")
@@ -226,6 +242,10 @@ def main():
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
             page.evaluate("hass.language='en';panel.hass={...hass}")
             expect(page.get_by_role("button", name="Create group", exact=True)).to_be_visible()
+            page.locator(".power-analysis").first.locator("summary").click()
+            expect(page.locator(".power-analysis").first).to_contain_text("Analysis only")
+            expect(page.locator(".power-analysis").first).to_contain_text("Moderate")
+            page.locator(".power-analysis").first.locator("summary").click()
             page.get_by_role("button", name="History and diagnostics", exact=True).first.click()
             expect(page.get_by_role("heading", name="12-hour statistics")).to_be_visible()
             page.get_by_role("button", name="Close", exact=True).click()
