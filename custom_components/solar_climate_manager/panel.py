@@ -179,7 +179,7 @@ def dashboard_series(hass):
         rows = coordinator.history.read(now)
         devices[entry.entry_id] = [
             {"timestamp": r["timestamp"], "state": {k: r["state"].get(k) for k in
-             ("temperature", "target_temperature")}} for r in rows]
+             ("temperature", "target_temperature", "running", "group_action", "group_reason")}} for r in rows]
         member = registry.membership(coordinator.device_id) if registry else None
         if member:
             shared = [r for r in rows if r["state"].get("group_id") == member.group_id]

@@ -96,8 +96,8 @@ export function gridIntervals(rows,start,end) {
       [{start:from,end:until,available:r.state.grid_available}]:[];
   });
 }
-export function historySummary(input, now) {
-  const start=now-12*3600;
+export function historySummary(input, now, hours=12) {
+  const start=now-hours*3600;
   const all=input.filter(r=>Number.isFinite(r.timestamp) && r.timestamp<=now).slice().sort((a,b)=>a.timestamp-b.timestamp);
   const rows=all.filter(r=>r.timestamp>=start);
   const totals={covered:0,on:0,off:0,blocked:0};
@@ -111,7 +111,7 @@ export function historySummary(input, now) {
     if(row.state.running===false)totals.off+=seconds;
     if(row.state.automation_mode==="temporary_block")totals.blocked+=seconds;
   }
-  return {start,rows,totals,unknown:12*3600-totals.covered};
+  return {start,rows,totals,unknown:hours*3600-totals.covered};
 }
 const SHARED_SECTIONS = {
   grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay"],
@@ -335,7 +335,7 @@ export class SolarClimatePanel extends HTMLElement {
     const section=el("section",null,"section"); section.append(el("h2",this.t("independent")));
     if (!independent.length) section.append(el("p",this.t("noIndependent"),"subtle"));
     else { const card=el("div",null,"group"); independent.forEach(d=>card.append(this.deviceCard(d))); section.append(card); }
-    content.append(section);
+    if(this._tab==="settings")content.append(section);
     const footer=el("div",null,"footer subtle");
     const link=el("a",this.t("integration")); link.href="/config/integrations/integration/solar_climate_manager";
     footer.append(link,el("span",` · ${data.version}`)); content.append(footer);
@@ -357,7 +357,7 @@ export class SolarClimatePanel extends HTMLElement {
       const button=this.button(`${hours} ${uk?"год":"h"}`,()=>{this._hours=hours;this._renderOverview();});
       button.setAttribute("aria-pressed",String(this._hours===hours));periods.append(button);
     }
-    heading.append(periods);card.append(heading);
+    if(this._tab==="analysis")heading.append(periods);card.append(heading);
     const tiles=el("div",null,"energy-tiles");
     const grid=group.grid_available===true?(uk?"Є живлення":"Connected"):group.grid_available===false?(uk?"Немає мережі":"Disconnected"):this.t("missing");
     const battery=Number.isFinite(group.battery_power)?`${group.battery_power<0?(uk?"Заряджання":"Charging"):(uk?"Розряджання":"Discharging")} ${this.watts(Math.abs(group.battery_power))}`:this.t("missing");
@@ -372,7 +372,8 @@ export class SolarClimatePanel extends HTMLElement {
       const tile=el("div",null,"energy-tile"),label=el("div",null,"tile-label"),symbol=el("ha-icon");symbol.setAttribute("icon",icon);label.style.color=color;label.append(symbol,el("span",title));
       tile.append(label,el("strong",value),el("div",note,"subtle"));tiles.append(tile);
     }
-    card.append(tiles);
+    if(this._tab==="overview")card.append(tiles);
+    if(this._tab==="analysis") {
     const rows=this._charts?.groups?.[group.group_id] || [];
     const charts=el("div",null,"dashboard-charts");
     charts.append(this.lineChart(uk?"Генерація та споживання":"Generation and consumption",rows,[["pv_power",uk?"Сонце":"Solar","#e9b331"],["generation_forecast",uk?"Прогноз":"Forecast","#f39a39",true],["load_power",uk?"Будинок":"House","#03a9f4"]],"kW",.001));
@@ -380,11 +381,12 @@ export class SolarClimatePanel extends HTMLElement {
     batteryCard.append(this.gridChart(rows));charts.append(batteryCard);card.append(charts);
     if(this._chartError)card.append(el("p",uk?"Не вдалося оновити графіки. Попередні дані можуть бути застарілими.":"Charts could not refresh. Previous data may be stale.","error"));
     card.append(el("p",uk?"Історія до 24 год; після перезапуску HA або reload збирається заново. Розриви означають відсутність даних.":"Up to 24h of history; collection restarts after HA restart or reload. Gaps indicate missing data.","subtle"));
+    }
     card.append(el("h3",this.t("devices")));
     const members=el("div",null,"dashboard-devices");
     for(const member of group.members) {
       const device=this._data.devices.find(d=>d.device_id===member.device_id);
-      members.append(device?this.dashboardDevice(device):el("div",this.t("unavailable"),"device"));
+      members.append(device?(this._tab==="analysis"?this.analyticsDevice(device):this.dashboardDevice(device)):el("div",this.t("unavailable"),"device"));
     }
     if(!group.members.length)members.append(el("p",this.t("noMembers")));
     card.append(members);return card;
@@ -453,7 +455,6 @@ export class SolarClimatePanel extends HTMLElement {
     const values=el("div",null,"values");
     for(const [label,value] of [[uk?"У кімнаті":"Room",this.temperature(device.temperature)],[uk?"Задано":"Target",this.temperature(device.target)],[measured?this.t("measured"):estimated?(uk?"Потужність · оцінка":"Power · estimate"):this.t("estimated"),power]]){const item=el("div");item.append(el("div",label,"subtle"),el("strong",value));values.append(item);}
     card.append(values,el("p",`${uk?"Датчик AC":"AC sensor"}: ${this.temperature(device.ac_temperature)} → ${uk?"уставка AC":"AC setpoint"}: ${this.temperature(device.ac_set_temperature)}`,"subtle"));
-    card.append(this.lineChart(uk?"Температура кімнати":"Room temperature",this._charts?.devices?.[device.entry_id] || [],[["temperature",uk?"Кімната":"Room","#03a9f4"],["target_temperature",uk?"Задана":"Target","#e9b331",true]],"°C"));
     card.append(el("p",`${this.stateText("group_action",device.action)} · ${this.stateText("group_reason",device.reason)}`,"reason"));
     const actions=el("div",null,"actions"),mode=el("select",null,"mode");mode.setAttribute("aria-label",`${this.t("mode")}: ${device.name}`);
     for(const value of ["disabled","observation","control","temporary_block"]){const o=el("option",this.stateText("operation_mode",value));o.value=value;mode.append(o);}mode.value=device.mode;mode.disabled=!device.loaded || !device.mode_entity;
@@ -465,7 +466,33 @@ export class SolarClimatePanel extends HTMLElement {
     actions.append(this.button(this.t("settings"),()=>this.selectTab("settings",device.device_id)));
     const history=this.button(this.t("history"),()=>this.showHistory(device));history.disabled=!device.loaded;actions.append(history);card.append(actions);
     if(device.command_status && device.command_status!=="idle")card.append(el("p",this.stateText("group_command_status",device.command_status),"subtle"));
-    if(this._tab==="analysis" && analysis) {const details=this.analysisCard(analysis,device.device_id);details.open=true;card.append(details);}else card.append(this.button(uk?"Аналіз потужності":"Power analysis",()=>this.selectTab("analysis",device.device_id)));
+    card.append(this.button(uk?"Графіки та аналіз":"Charts and analysis",()=>this.selectTab("analysis",device.device_id)));
+    return card;
+  }
+  analyticsDevice(device) {
+    const uk=this._lang==="uk",card=el("article",null,"device analytics-device");card.dataset.deviceId=device.device_id;
+    card.append(el("h3",device.name));
+    const rows=(this._charts?.devices?.[device.entry_id] || []).slice().sort((a,b)=>a.timestamp-b.timestamp),{start,end}=this.chartWindow();
+    card.append(this.lineChart(uk?"Температура кімнати":"Room temperature",rows,[["temperature",uk?"Кімната":"Room","#03a9f4"],["target_temperature",uk?"Задана":"Target","#e9b331",true]],"°C"));
+    const summary=historySummary(rows,end,this._hours),stats=el("div",null,"values runtime-stats");
+    for(const [key,seconds] of [["onTime",summary.totals.on],["offTime",summary.totals.off],["unknown",this._hours*3600-summary.totals.on-summary.totals.off]]) {
+      const item=el("div");item.append(el("div",this.t(key),"subtle"),el("strong",`${(seconds/3600).toLocaleString(this._lang,{maximumFractionDigits:2})} ${this.t("hours")}`));stats.append(item);
+    }
+    card.append(stats);
+    const events=el("details",null,"decision-history");events.append(el("summary",uk?"Зміни стану та причини рішень":"State changes and decision reasons"));
+    let previous=null;const changes=[];
+    for(const row of rows) {
+      const signature=JSON.stringify([row.state.running,row.state.group_action,row.state.group_reason]);
+      if(row.timestamp>=start && row.timestamp<=end && signature!==previous)changes.push(row);
+      previous=signature;
+    }
+    for(const row of changes.slice(-20).reverse())events.append(el("p",`${new Date(row.timestamp*1000).toLocaleString(this._lang)} · ${row.state.running===true?this.t("onTime"):row.state.running===false?this.t("offTime"):this.t("missing")} · ${this.stateText("group_action",row.state.group_action)} · ${this.stateText("group_reason",row.state.group_reason)}`));
+    events.append(el("p",uk?"До 20 останніх змін у вибраному періоді. Причина рішення не завжди є причиною фізичного вимкнення.":"Up to 20 recent changes in the selected period. A decision reason does not always explain a physical shutdown.","subtle"));
+    if(!changes.length)events.append(el("p",this.t("historyEmpty")));
+    card.append(events);
+    if(device.power_analysis) {const details=this.analysisCard(device.power_analysis,device.device_id);details.open=true;card.append(details);}
+    else card.append(el("p",this.t("historyEmpty"),"empty"));
+    const history=this.button(this.t("history"),()=>this.showHistory(device));history.disabled=!device.loaded;card.append(history);
     return card;
   }
   async quickTarget(device,direction) {

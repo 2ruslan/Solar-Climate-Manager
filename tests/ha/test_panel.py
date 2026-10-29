@@ -31,7 +31,9 @@ async def test_dashboard_is_read_only_admin_only_and_filters_old_groups(hass, ha
         result = response["result"]
         assert first.entry_id in result["devices"]
         assert group_id in result["groups"]
-        assert set(result["devices"][first.entry_id][-1]["state"]) == {"temperature", "target_temperature"}
+        assert set(result["devices"][first.entry_id][-1]["state"]) == {
+            "temperature", "target_temperature", "running", "group_action", "group_reason",
+        }
         calls.assert_not_called()
     readonly = await hass_ws_client(hass, access_token=hass_read_only_access_token)
     await readonly.send_json_auto_id({"type": f"{DOMAIN}/dashboard"})
