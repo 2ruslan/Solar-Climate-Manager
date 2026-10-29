@@ -61,6 +61,8 @@ class PowerAnalysis:
                 LOGGER.exception("Cannot save power analysis; control is unaffected")
         for group in self.groups.values():
             group.reset_cycle()
+            group.adaptive.reset("waiting_background")
+            group.adaptive.last_report = None
             group.last_report = group.last_sample = None
 
     def conditions(self, coordinator: Any, *, phase: str = "steady") -> Conditions | None:
@@ -93,6 +95,7 @@ class PowerAnalysis:
         if any(key not in devices for key in members):
             if group.group_id in self.groups:
                 self.groups[group.group_id].reject("invalid_data")
+                self.groups[group.group_id].adaptive.reset("invalid_data")
             return
         context = [group.sources.load_power_entity, group.policy.load_scope,
                    group.policy.load_includes_battery_charging,
@@ -133,6 +136,7 @@ class PowerAnalysis:
                       watts=watts, members=readings, valid=valid)
         if group.policy.load_scope != "includes_all_members":
             model.status = "unsupported_load"
+            model.adaptive.status = "unsupported_load"
         live_groups = {g.group_id for g in registry.groups}
         self.groups = {k: v for k, v in self.groups.items() if k in live_groups}
         if snapshot.now - self.last_save >= 60:
@@ -144,6 +148,8 @@ class PowerAnalysis:
         now = dt_util.utcnow().timestamp()
         phase = "startup" if model.started is None or now - model.started < 600 else "steady"
         result = model.estimate(coordinator.device_id, self.conditions(coordinator, phase=phase), now)
+        result["adaptive"] = model.adaptive.view(coordinator.device_id, self.conditions(coordinator), now)
+        result["adaptive"]["status"] = self.error or result["adaptive"]["status"]
         result["status"] = self.error or result["status"]
         return result
 

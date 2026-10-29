@@ -160,6 +160,23 @@ def main():
             analysis.screenshot(path="/tmp/scm-analysis-mobile.png")
             page.set_viewport_size({"width": 1280, "height": 1080})
             analysis.screenshot(path="/tmp/scm-analysis-desktop.png")
+            page.evaluate("""()=>{
+              const d=fixture.overview.devices.find(d=>d.group_id);
+              d.power_analysis.adaptive={status:'interval_ready',low:450,high:780,windows:6,minutes:30,background_samples:120,
+                profiles:[{conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:5},low:450,high:780,windows:6,minutes:30,updated_at:1793023200}]};
+              return panel.refresh();
+            }""")
+            expect(analysis).to_contain_text("450 W – 780 W")
+            expect(analysis.locator(".interval-profiles tbody")).to_contain_text("21 → 24 °C")
+            expect(analysis.locator(".interval-profiles tbody")).to_contain_text("6 / 30")
+            analysis.screenshot(path="/tmp/scm-adaptive-desktop.png")
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
+            analysis.screenshot(path="/tmp/scm-adaptive-mobile.png")
+            page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.status='multiple_running';panel.refresh()")
+            expect(analysis).to_contain_text("окремі оцінки не оновлюються")
+            page.evaluate("delete fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;panel.refresh()")
+            page.set_viewport_size({"width": 1280, "height": 1080})
             page.get_by_role("tab", name="Налаштування", exact=True).click()
             page.get_by_role("button", name="Історія та діагностика", exact=True).first.click()
             expect(page.get_by_role("heading", name="Статистика за 12 годин")).to_be_visible()

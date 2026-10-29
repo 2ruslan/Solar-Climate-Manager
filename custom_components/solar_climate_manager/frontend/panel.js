@@ -162,6 +162,7 @@ const STYLE = `
   .tile-label { font-size:14px; display:flex; align-items:center; gap:8px; }.tile-label ha-icon { width:22px; height:22px; }
   .dashboard-charts { display:grid; grid-template-columns:1.4fr 1fr; gap:16px; margin-bottom:22px; }
   .dashboard-devices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:16px; }
+  .dashboard-devices .analytics-device:has(.interval-profiles) { grid-column:1 / -1; }
   .dashboard-devices .values strong { font-size:24px; }.dashboard-devices .reason { padding:10px; background:var(--secondary-background-color,#eff5f1); border-radius:8px; }
   .dashboard-group { margin-bottom:32px; }.periods { display:flex; gap:4px; flex-wrap:wrap; }
   .chart { width:100%; display:block; color:var(--secondary-text-color,#61756b); touch-action:pan-y; }
@@ -926,6 +927,29 @@ export class SolarClimatePanel extends HTMLElement {
     card.open=this._analysisOpen.has(deviceId);
     card.addEventListener("toggle",()=>{if(card.isConnected){if(card.open)this._analysisOpen.add(deviceId);else this._analysisOpen.delete(deviceId);}});
     card.append(el("summary",uk?"Аналіз потужності":"Power analysis"));
+    if(analysis.adaptive) {
+      const a=analysis.adaptive;
+      const states={waiting_background:["Потрібні покази фону, коли всі кондиціонери вимкнені (за останні 24 год)","Need an off baseline from the last 24 hours"],ready:["Фон накопичується; очікування роботи кондиціонера","Collecting off baseline; waiting for AC operation"],warming_up:["Стабілізація: 10 хв після початку спостереження або зміни умов","Settling: 10 min after observation starts or conditions change"],collecting_interval:["Збір п’ятихвилинного вікна","Collecting a five-minute window"],interval_ready:["Попередній діапазон оновлено","Provisional interval updated"],multiple_running:["Кілька кондиціонерів працюють; окремі оцінки не оновлюються","Multiple ACs running; individual estimates paused"],invalid_data:["Дані відсутні або застарілі","Missing or stale data"],data_gap:["Перерва в даних; стабілізація починається заново","Data gap; settling restarts"],unsupported_load:["Лічильник має включати всі кондиціонери групи","Meter must include all group ACs"],storage_error:["Помилка збереження аналізу","Analysis storage error"]};
+      card.append(el("p",uk?"Лише аналіз — не впливає на керування. Попередні межі, не гарантований діапазон і не вимірювання окремим лічильником.":"Analysis only — does not affect control. Provisional bounds, not guaranteed or separately metered.","subtle"));
+      card.append(el("p",states[a.status]?.[uk?0:1] || a.status));
+      card.append(el("p",`${uk?"Оцінка для поточних умов":"Current conditions estimate"}: ${Number.isFinite(a.low)?`${this.watts(a.low)} – ${this.watts(a.high)}`:this.t("missing")} · ${uk?"Попередня":"Provisional"}`));
+      card.append(el("p",`${uk?"Вікон / хвилин спостережень":"Windows / observed minutes"}: ${a.windows} / ${a.minutes} · ${uk?"Показів фону":"Off baseline samples"}: ${a.background_samples}`));
+      if(a.status==="warming_up" && Number.isFinite(a.warmup_remaining))card.append(el("p",`${uk?"До збору вікна":"Until window collection"}: ${Math.ceil(a.warmup_remaining/60)} ${uk?"хв":"min"}`));
+      card.append(el("p",uk?"Перша оцінка — орієнтовно через 15 хв незмінних умов за наявності фону. Короткі стрибки фільтруються медіанами; тривале навантаження інших приладів усе ще може впливати. Старі дані розширюють межі. Час увімкненого режиму не означає безперервну роботу компресора.":"First estimate after about 15 min of unchanged conditions with an off baseline. Medians filter short spikes; sustained appliance loads can still bias estimates. Aging widens bounds. On mode does not imply continuous compressor operation.","subtle"));
+      if(a.profiles?.length) {
+        const scroll=el("div",null,"history-scroll"),table=el("table",null,"interval-profiles"),head=el("tr"),thead=el("thead"),body=el("tbody");
+        for(const title of uk?["Температура AC → уставка","Режим / вентилятор","Зовні","Нижня оцінка","Верхня оцінка","Вікон / хв","Оновлено"]:["AC temperature → setpoint","Mode / fan","Outside","Lower estimate","Upper estimate","Windows / min","Updated"])head.append(el("th",title));
+        thead.append(head);table.append(thead);
+        for(const row of a.profiles) {
+          const c=row.conditions,tr=el("tr");
+          for(const value of [`${c.indoor} → ${c.target} °C`,`${c.mode} / ${c.fan}`,c.outdoor===null?"—":`${c.outdoor} °C`,this.watts(row.low),this.watts(row.high),`${row.windows} / ${row.minutes}`,new Date(row.updated_at*1000).toLocaleString(this._lang)])tr.append(el("td",value));
+          body.append(tr);
+        }
+        table.append(body);scroll.append(table);card.append(scroll);
+        card.append(el("p",uk?"Профілі об’єднують близькі температури (крок близько 2 °C). Поточна оцінка також враховує сусідні профілі; всі межі попередні.":"Profiles group nearby temperatures (about 2 °C bins). Current estimates also use neighbouring profiles; all bounds are provisional.","subtle"));
+      } else card.append(el("p",uk?"Профілі ще не зібрано. Причину очікування наведено вище.":"No profiles collected yet. See the waiting reason above."));
+      return card;
+    }
     const statuses={
       waiting_background:["Потрібен стабільний фон перед запуском","Waiting for a stable off baseline"],
       ready:["Фон зібрано; очікування циклу","Baseline ready; waiting for a cycle"],

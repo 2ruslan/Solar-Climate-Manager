@@ -35,9 +35,12 @@ async def test_passive_analysis_collects_off_background_and_persists_cycle(hass,
             await report(600)
         assert manager.power_analysis.background_view(group_id)["watts"] == 600
         hass.states.async_set("climate.test", "heat", climate_attrs)
-        for _ in range(28):
+        for _ in range(36):
             await report(1200)
         assert manager.power_analysis.groups[group_id].pending
+        live = manager.power_analysis.view(group_id, coordinator)["adaptive"]
+        assert live["windows"] >= 1
+        assert live["low"] < 600 < live["high"]
         hass.states.async_set("climate.test", "off", climate_attrs)
         for _ in range(5):
             await report(600)
@@ -53,6 +56,7 @@ async def test_passive_analysis_collects_off_background_and_persists_cycle(hass,
         restored = PowerAnalysis(hass)
         await restored.async_load()
         assert restored.view(group_id, coordinator)["cycles"] == 1
+        assert restored.view(group_id, coordinator)["adaptive"]["profiles"]
         assert restored.groups[group_id].active is None
         calls.assert_not_called()
     assert await hass.config_entries.async_unload(entry.entry_id)

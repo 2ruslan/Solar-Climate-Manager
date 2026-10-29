@@ -9,6 +9,86 @@ from test_groups import groups  # noqa: F401
 p = importlib.import_module("scm_adapter_test.domain.power_analysis")
 
 
+class AdaptiveAnalysisTests(unittest.TestCase):
+    def setUp(self):
+        self.model = p.AdaptiveAnalysis()
+        self.conditions = p.Conditions("heat", "auto", 21, 24, 5)
+        for t in range(0, 121, 30):
+            self.point(t, 300, False)
+
+    def point(self, t, watts=900, active=True):
+        self.model.observe(t, t, watts, {"ac": self.conditions if active else None}, True)
+
+    def run_until(self, end, start=150):
+        for t in range(start, end+1, 30):
+            self.point(t)
+
+    def test_estimate_during_first_run_and_longer_than_six_hours(self):
+        self.run_until(1050)
+        view = self.model.view("ac", self.conditions, 1050)
+        self.assertEqual(view["windows"], 1)
+        self.assertLess(view["low"], 600)
+        self.assertGreater(view["high"], 600)
+        self.run_until(24000, 1080)
+        self.assertGreater(self.model.view("ac", self.conditions, 24000)["windows"], 20)
+
+    def test_short_appliance_spike_is_filtered(self):
+        self.run_until(900)
+        self.point(930, 5000)
+        self.run_until(1050, 960)
+        row = self.model.evidence["ac"][0]
+        self.assertLess(row["high"], 1000)
+
+    def test_repetition_narrows_conflicts_and_age_widen(self):
+        self.run_until(1050)
+        first = self.model.evidence["ac"][0]
+        one = self.model.aggregate([first], 1050)
+        repeated = [{**first, "time": 1050+i*330} for i in range(10)]
+        narrow = self.model.aggregate(repeated, 4020)
+        self.assertLess(narrow["high"]-narrow["low"], one["high"]-one["low"])
+        conflicting = [*repeated, *[{**r, "low": r["low"]+800, "high": r["high"]+800} for r in repeated]]
+        wide = self.model.aggregate(conflicting, 4020)
+        self.assertGreater(wide["high"]-wide["low"], narrow["high"]-narrow["low"])
+        aged = self.model.aggregate(repeated, 4020+86400)
+        self.assertGreater(aged["high"]-aged["low"], narrow["high"]-narrow["low"])
+
+    def test_no_evidence_from_duplicates_overlap_or_missing_background(self):
+        self.model = p.AdaptiveAnalysis()
+        self.run_until(1200)
+        self.assertFalse(self.model.evidence)
+        self.setUp()
+        self.run_until(900)
+        for _ in range(50):
+            self.point(900)
+        self.assertFalse(self.model.evidence)
+        self.model.observe(901, 900, 1500, {"ac": self.conditions, "other": self.conditions}, True)
+        self.assertEqual(self.model.status, "multiple_running")
+        self.assertFalse(self.model.window)
+        self.run_until(1200, 930)
+        self.assertFalse(self.model.evidence)
+
+    def test_conditions_and_gap_restart_collection(self):
+        self.run_until(900)
+        self.conditions = replace(self.conditions, fan="high")
+        self.point(930)
+        self.assertFalse(self.model.window)
+        self.assertEqual(self.model.status, "warming_up")
+        self.point(1200)
+        self.assertEqual(self.model.since, 1200)
+
+    def test_restore_validates_and_keeps_evidence_without_live_window(self):
+        self.run_until(1050)
+        saved = self.model.stored()
+        saved["evidence"]["ac"].append({"time": float("nan")})
+        restored = p.AdaptiveAnalysis.restore(saved, 1100)
+        self.assertEqual(len(restored.evidence["ac"]), 1)
+        self.assertIsNone(restored.active)
+        self.assertFalse(restored.window)
+        self.assertEqual(restored.view("ac", replace(self.conditions, fan="high"), 1100)["windows"], 0)
+        restored.prune(1100+p.RETENTION)
+        self.assertFalse(restored.evidence["ac"])
+
+
 class PowerAnalysisTests(unittest.TestCase):
     def setUp(self):
         self.model = p.GroupAnalysis(context="installation")
