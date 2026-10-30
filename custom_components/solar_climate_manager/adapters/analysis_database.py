@@ -6,10 +6,10 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from ..domain.power_analysis import AdaptiveAnalysis, Conditions
+from ..domain.power_analysis import RAW_RETENTION, AdaptiveAnalysis, Conditions
 
 MAX_ROWS = 10000
-GROUP_ROWS = 1440
+GROUP_ROWS = 2880
 MAX_PAYLOAD = 2048
 MAX_PAGES = 8192  # 32 MiB with 4096-byte pages; journal is transient and bounded too.
 
@@ -35,12 +35,12 @@ class AnalysisDatabase:
                        "group_id TEXT, context TEXT, minute INTEGER, stamp REAL, watts REAL, "
                        "members TEXT, PRIMARY KEY(group_id, minute))")
             with db:
-                db.execute("DELETE FROM observations WHERE stamp < ? OR stamp > ?", (now-86400, now))
+                db.execute("DELETE FROM observations WHERE stamp < ? OR stamp > ?", (now-RAW_RETENTION, now))
                 for group, context in db.execute("SELECT DISTINCT group_id, context FROM observations").fetchall():
                     if group not in models or models[group][0] != context:
                         db.execute("DELETE FROM observations WHERE group_id=? AND context=?", (group, context))
                 for group, context, stamp, watts, members in batch:
-                    if (group in models and models[group][0] == context and now-86400 <= stamp <= now
+                    if (group in models and models[group][0] == context and now-RAW_RETENTION <= stamp <= now
                             and len(members.encode("utf-8")) <= MAX_PAYLOAD):
                         db.execute("INSERT OR IGNORE INTO observations VALUES (?,?,?,?,?,?)",
                                    (group, context, int(stamp//60), stamp, watts, members))

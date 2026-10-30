@@ -2,7 +2,7 @@
 
 import importlib
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from test_groups import groups  # noqa: F401
 
@@ -10,6 +10,26 @@ p = importlib.import_module("scm_adapter_test.domain.power_analysis")
 
 
 class AdaptiveAnalysisTests(unittest.TestCase):
+    def test_outdoor_bins_use_explicit_five_degree_intervals(self):
+        for temperature, bounds in [(12.47, (10, 15)), (12.83, (10, 15)),
+                                    (15, (15, 20)), (-.1, (-5, 0)), (-5, (-5, 0)),
+                                    (-5.01, (-10, -5)), (0, (0, 5))]:
+            self.assertEqual(replace(self.conditions, outdoor=temperature).outdoor_range(), bounds)
+        self.assertIsNone(replace(self.conditions, outdoor=None).outdoor_range())
+
+    def test_existing_samples_regroup_without_losing_evidence(self):
+        self.model.evidence["ac"] = [
+            {"time": 1000+i*60, "conditions": asdict(replace(self.conditions, outdoor=t)),
+             "low": 0, "high": 900, "seconds": 60, "identified": False}
+            for i, t in enumerate((12.47, 12.83, 15, -.1))]
+        restored = p.AdaptiveAnalysis.restore(self.model.stored(), 1200)
+        profiles = restored.view("ac", self.conditions, 1200)["profiles"]
+        self.assertEqual(len(profiles), 3)
+        merged = next(row for row in profiles if row["outdoor_range"] == (10, 15))
+        self.assertEqual(merged["windows"], 2)
+        self.assertEqual(merged["minutes"], 2)
+        self.assertEqual(sum(row["windows"] for row in profiles), 4)
+
     def setUp(self):
         self.model = p.AdaptiveAnalysis()
         self.conditions = p.Conditions("heat", "auto", 21, 24, 5)

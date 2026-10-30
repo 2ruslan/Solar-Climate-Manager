@@ -28,11 +28,12 @@ class AnalysisDatabaseTests(unittest.TestCase):
 
     def test_retention_and_physical_space_reclaimed_without_new_samples(self):
         models = {"g": ("v1", p.AdaptiveAnalysis())}
-        rows = [("g", "v1", t, 300, '{"ac":null}') for t in range(0, 86401, 60)]
-        self.db.exchange(rows, models, 86400)
-        self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 1440)
+        rows = [("g", "v1", t, 300, '{"ac":null}') for t in range(0, 172801, 60)]
+        self.db.exchange(rows, models, 172800)
+        self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 2880)
+        self.assertEqual(self.read("SELECT MIN(stamp) FROM observations")[0][0], 60)
         size = Path(self.path).stat().st_size
-        self.db.exchange([], models, 172801)
+        self.db.exchange([], models, 345601)
         self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 0)
         self.assertLess(Path(self.path).stat().st_size, size)
         self.assertLess(size, 32*1024*1024)

@@ -5,13 +5,15 @@ These are aggregate-load estimates, never measurements or allocation inputs.
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from math import isfinite
+from math import floor, isfinite
 from statistics import median
 from typing import Any
 
 RETENTION = 30 * 86400
+RAW_RETENTION = 48 * 3600
 MAX_SAMPLES = 2000
 MAX_CYCLE = 6 * 3600
+OUTDOOR_STEP = 5
 
 
 def numeric(value: Any) -> bool:
@@ -48,7 +50,13 @@ class Conditions:
 
     def bucket(self) -> tuple[Any, ...]:
         return (self.mode, self.fan, round(self.indoor / 2), round(self.target / 2),
-                None if self.outdoor is None else round(self.outdoor / 5), self.phase)
+                None if self.outdoor is None else floor(self.outdoor / OUTDOOR_STEP), self.phase)
+
+    def outdoor_range(self) -> tuple[int, int] | None:
+        if self.outdoor is None:
+            return None
+        start = floor(self.outdoor / OUTDOOR_STEP) * OUTDOOR_STEP
+        return start, start + OUTDOOR_STEP
 
 
 @dataclass
@@ -70,7 +78,7 @@ class AdaptiveAnalysis:
         self.status = status
 
     def prune(self, now: float) -> None:
-        self.background = [(t, v) for t, v in self.background if 0 <= now-t <= 86400][-2880:]
+        self.background = [(t, v) for t, v in self.background if 0 <= now-t <= RAW_RETENTION][-2880:]
         self.evidence = {k: [r for r in rows if 0 <= now-r["time"] <= RETENTION][-2000:]
                          for k, rows in self.evidence.items()}
 
@@ -79,7 +87,7 @@ class AdaptiveAnalysis:
                 historical: bool = False) -> None:
         self.prune(now)
         if (not valid or not numeric(reported) or reported is None
-                or not 0 <= now-reported <= (86400 if historical else 90)
+                or not 0 <= now-reported <= (RAW_RETENTION if historical else 90)
                 or not numeric(watts) or watts is None or watts < 0):
             self.reset("invalid_data")
             return
@@ -107,7 +115,7 @@ class AdaptiveAnalysis:
         self.window.append((reported, watts))
         self.window = self.window[-5:]
         total = median(v for _, v in self.window)
-        background = [(t, v) for t, v in self.background if 0 <= now-t <= 86400]
+        background = [(t, v) for t, v in self.background if 0 <= now-t <= RAW_RETENTION]
         base = sorted(v for _, v in background)
         known_background = len(base) >= 3
         low_base = base[int((len(base)-1)*.1)] if known_background else 0
@@ -154,7 +162,9 @@ class AdaptiveAnalysis:
         buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for row in rows:
             buckets.setdefault(Conditions(**row["conditions"]).bucket(), []).append(row)
-        profiles = [{"conditions": values[-1]["conditions"], **self.aggregate(values, now)}
+        profiles = [{"conditions": values[-1]["conditions"],
+                     "outdoor_range": Conditions(**values[-1]["conditions"]).outdoor_range(),
+                     **self.aggregate(values, now)}
                     for values in buckets.values()]
         profiles.sort(key=lambda r: r["updated_at"], reverse=True)
         matches = [r for r in rows if condition and condition.similar(Conditions(**r["conditions"]))]

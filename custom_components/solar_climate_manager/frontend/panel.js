@@ -935,18 +935,18 @@ export class SolarClimatePanel extends HTMLElement {
       card.append(el("p",`${uk?"Оцінка для поточних умов":"Current conditions estimate"}: ${Number.isFinite(a.low)?`${this.watts(a.low)} – ${this.watts(a.high)}`:this.t("missing")} · ${uk?"Попередня":"Provisional"}`));
       card.append(el("p",`${uk?"Зразків / хвилин спостережень":"Samples / observed minutes"}: ${a.windows} / ${a.minutes} · ${uk?"Показів фону":"Off baseline samples"}: ${a.background_samples}`));
       if(a.status==="warming_up" && Number.isFinite(a.warmup_remaining))card.append(el("p",`${uk?"До збору вікна":"Until window collection"}: ${Math.ceil(a.warmup_remaining/60)} ${uk?"хв":"min"}`));
-      card.append(el("p",uk?"Оновлення пакетами приблизно раз на 5 хв. SQLite зберігає лише 24 год сирих даних: до 1440 записів на групу, до 10 000 загалом. Без достатнього фону нижня межа — 0 Вт. Короткі стрибки згладжуються; тривала робота інших приладів може впливати на оцінку.":"Updates in batches about every 5 min. SQLite retains only 24h of raw data: up to 1440 rows per group and 10,000 total. Without enough baseline evidence the lower bound is 0 W. Short spikes are smoothed; sustained appliance loads can bias estimates.","subtle"));
+      card.append(el("p",uk?"Оновлення пакетами приблизно раз на 5 хв. SQLite зберігає лише 48 год сирих даних: до 2880 записів на групу, до 10 000 загалом. Без достатнього фону нижня межа — 0 Вт. Короткі стрибки згладжуються; тривала робота інших приладів може впливати на оцінку.":"Updates in batches about every 5 min. SQLite retains only 48h of raw data: up to 2880 rows per group and 10,000 total. Without enough baseline evidence the lower bound is 0 W. Short spikes are smoothed; sustained appliance loads can bias estimates.","subtle"));
       if(a.profiles?.length) {
         const scroll=el("div",null,"history-scroll"),table=el("table",null,"interval-profiles"),head=el("tr"),thead=el("thead"),body=el("tbody");
         for(const title of uk?["Температура AC → уставка","Режим / вентилятор","Зовні","Нижня оцінка","Верхня оцінка","Зразків / хв","Оновлено"]:["AC temperature → setpoint","Mode / fan","Outside","Lower estimate","Upper estimate","Samples / min","Updated"])head.append(el("th",title));
         thead.append(head);table.append(thead);
         for(const row of a.profiles) {
           const c=row.conditions,tr=el("tr");
-          for(const value of [`${c.indoor} → ${c.target} °C`,`${c.mode} / ${c.fan}`,c.outdoor===null?"—":`${c.outdoor} °C`,this.watts(row.low),this.watts(row.high),`${row.windows} / ${row.minutes}`,new Date(row.updated_at*1000).toLocaleString(this._lang)])tr.append(el("td",value));
+          for(const value of [`${c.indoor} → ${c.target} °C`,`${c.mode} / ${c.fan}`,row.outdoor_range?`${row.outdoor_range[0]} … < ${row.outdoor_range[1]} °C`:this.t("missing"),this.watts(row.low),this.watts(row.high),`${row.windows} / ${row.minutes}`,new Date(row.updated_at*1000).toLocaleString(this._lang)])tr.append(el("td",value));
           body.append(tr);
         }
         table.append(body);scroll.append(table);card.append(scroll);
-        card.append(el("p",uk?"Профілі об’єднують близькі температури (крок близько 2 °C). Поточна оцінка також враховує сусідні профілі; всі межі попередні.":"Profiles group nearby temperatures (about 2 °C bins). Current estimates also use neighbouring profiles; all bounds are provisional.","subtle"));
+        card.append(el("p",uk?"Температури AC об’єднуються з кроком близько 2 °C; зовнішня — інтервалами по 5 °C від нуля. Нижня межа включена, верхня — ні: 12,47 і 12,83 °C належать до 10 … < 15 °C. Точні покази зберігаються. Різниця оцінок сама по собі не доводить вплив погоди.":"AC temperatures use about 2 °C bins; outdoor temperatures use 5 °C intervals anchored at zero. The lower bound is included, the upper excluded: 12.47 and 12.83 °C both belong to 10 … < 15 °C. Exact readings are retained. Differences in estimates alone do not establish a weather effect.","subtle"));
       } else card.append(el("p",uk?"Профілі ще не зібрано. Причину очікування наведено вище.":"No profiles collected yet. See the waiting reason above."));
       return card;
     }

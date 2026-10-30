@@ -163,12 +163,14 @@ def main():
             page.evaluate("""()=>{
               const d=fixture.overview.devices.find(d=>d.group_id);
               d.power_analysis.adaptive={status:'interval_ready',low:450,high:780,windows:6,minutes:30,background_samples:120,
-                profiles:[{conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:5},low:450,high:780,windows:6,minutes:30,updated_at:1793023200}]};
+                profiles:[{conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:12.83},outdoor_range:[10,15],low:450,high:780,windows:6,minutes:30,updated_at:1793023200}]};
               return panel.refresh();
             }""")
             expect(analysis).to_contain_text("450 W – 780 W")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("21 → 24 °C")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("6 / 30")
+            expect(analysis.locator(".interval-profiles tbody")).to_contain_text("10 … < 15 °C")
+            expect(analysis.locator(".interval-profiles tbody")).not_to_contain_text("12.83")
             analysis.screenshot(path="/tmp/scm-adaptive-desktop.png")
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
@@ -176,7 +178,7 @@ def main():
             page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.status='rough_interval';fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.low=0;panel.refresh()")
             expect(analysis).to_contain_text("Груба оцінка")
             expect(analysis).to_contain_text("0 W – 780 W")
-            expect(analysis).to_contain_text("1440 записів на групу")
+            expect(analysis).to_contain_text("2880 записів на групу")
             page.evaluate("delete fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;panel.refresh()")
             page.set_viewport_size({"width": 1280, "height": 1080})
             page.get_by_role("tab", name="Налаштування", exact=True).click()
