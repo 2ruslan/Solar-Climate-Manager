@@ -14,6 +14,38 @@ from ..power import power_watts, signed_power_watts, soc_percent
 from ..strategy import house_load_power
 
 
+class SourceCache:
+    """Hold sensor states for ten minutes from the first observed outage.
+
+    Original timestamps remain intact for learning and command accounting.
+    Climate availability is always read live.
+    """
+
+    def __init__(self):
+        self.states = {}
+        self.missing_since = {}
+
+    def capture(self, raw, settings, now):
+        active = {(key, settings.get(key)) for key in raw}
+        self.states = {key: state for key, state in self.states.items() if key in active}
+        self.missing_since = {
+            key: since for key, since in self.missing_since.items() if key in active
+        }
+        result = dict(raw)
+        for key, state in raw.items():
+            identity = (key, settings.get(key))
+            if key == "climate_entity" or not identity[1]:
+                continue
+            if state is not None and state.state not in ("unknown", "unavailable"):
+                self.states[identity] = state
+                self.missing_since.pop(identity, None)
+                continue
+            since = self.missing_since.setdefault(identity, now)
+            if 0 <= (now - since).total_seconds() < 600:
+                result[key] = self.states.get(identity, state)
+        return result
+
+
 def climate_temperature(climate: Any, attribute: str, unit: str) -> float | None:
     """Normalize a climate attribute using the caller's chosen display unit."""
     return temperature_celsius(climate.attributes.get(attribute), unit)
@@ -36,6 +68,7 @@ def read_sources(
     temperature_unit: str,
     now: datetime,
     last_temperature: float | None = None,
+    cache: SourceCache | None = None,
 ) -> SourceSnapshot:
     keys = ("temperature_entity", "climate_entity", *OPTIONAL_SOURCES)
     # HA State objects are immutable; the entire capture is synchronous (no awaits).
@@ -45,6 +78,8 @@ def read_sources(
         if entity_id
     }
     raw = {key: by_id.get(settings.get(key)) for key in keys}
+    if cache is not None:
+        raw = cache.capture(raw, settings, now)
     state = raw["temperature_entity"]
     climate = raw["climate_entity"]
     temperature = (
@@ -64,7 +99,7 @@ def read_sources(
         elif outdoor < settings.get("minimum_outdoor_temperature", -5.0):
             outdoor_block = "low_outdoor_temperature"
     measured_temperature = temperature
-    if temperature is None:
+    if temperature is None and cache is None:
         temperature = last_temperature
     climate_valid = (
         climate is not None

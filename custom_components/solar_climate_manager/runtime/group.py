@@ -436,7 +436,7 @@ class GroupManager:
             coordinator.runtime.device,
             self.hass.config.units.temperature_unit,
             dt_util.utcnow(),
-            last_temperature=coordinator.last_temperature,
+            cache=coordinator.source_cache,
         )
         data = {"temperature": source.temperature, "ac_temperature": source.ac_temperature}
         return bool(coordinator.commands._control_command(climate, data) == (service, payload))

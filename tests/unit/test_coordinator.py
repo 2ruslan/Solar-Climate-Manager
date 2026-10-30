@@ -322,6 +322,9 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.coordinator.data["solar_margin"], 1300)
         self.put("sensor.battery", "unavailable")
         self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["house_load_power"], 600)
+        clock.current += timedelta(seconds=600)
+        self.coordinator._evaluate()
         self.assertIsNone(self.coordinator.data["house_load_power"])
         self.assertTrue(self.coordinator.data["energy_data_invalid"])
 
@@ -577,13 +580,13 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.coordinator.data["running"])
         self.assertEqual(self.hass.services.async_call.await_count, 1)
 
-    async def test_last_temperature_survives_reload_while_sensor_unavailable(self):
+    async def test_reload_does_not_reuse_temperature_without_outage_timestamp(self):
         await self.coordinator.async_shutdown()
         self.put("sensor.room", "unavailable", unit_of_measurement="°C")
         new = adapter.SolarClimateCoordinator(self.hass, self.entry)
         await new.async_initialize()
-        self.assertEqual(new.data["temperature"], 20)
-        self.assertTrue(new.data["demand"])
+        self.assertIsNone(new.data["temperature"])
+        self.assertTrue(new.data["invalid_data"])
         self.put("sensor.room", "25", unit_of_measurement="°C")
         new._evaluate()
         self.assertEqual(new.data["temperature"], 25)
@@ -613,7 +616,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         new._evaluate()
         self.assertEqual(new.data["temperature"], 25)
         self.assertFalse(new.data["demand"])
-        for value in ("unknown", "unavailable", "nan", "bad"):
+        for value in ("unknown", "unavailable"):
             self.put("sensor.room", value, unit_of_measurement="°C")
             new._evaluate()
             self.assertEqual(new.data["temperature"], 25)
@@ -940,6 +943,9 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.coordinator.data["energy_allowed"])
         self.assertEqual(self.coordinator.data["energy_reason"], "grid_ready")
         self.put("sensor.soc", "unavailable")
+        self.coordinator._evaluate()
+        self.assertTrue(self.coordinator.data["energy_allowed"])
+        clock.current += timedelta(seconds=600)
         self.coordinator._evaluate()
         self.assertFalse(self.coordinator.data["energy_allowed"])
         self.assertEqual(self.coordinator.data["energy_reason"], "invalid_energy_data")

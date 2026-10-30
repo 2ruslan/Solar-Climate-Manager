@@ -10,7 +10,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .adapters.sources import read_sources
+from .adapters.sources import SourceCache, read_sources
 from .adapters.storage import create_store
 from .climate_control import normalized_target
 from .const import DEFAULTS, DOMAIN, OPTIONAL_SOURCES, REMOVED_SETTINGS
@@ -43,6 +43,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         self.settings.pop("temporary_block_date", None)
         self.store = create_store(hass, entry.entry_id)
         self.runtime = DeviceRuntime(self.settings)
+        self.source_cache = SourceCache()
         self.last_temperature = None
         self.power_learning = PowerLearning()
         self._source_ids = None
@@ -170,7 +171,7 @@ class SolarClimateCoordinator(DataUpdateCoordinator):
         sources = read_sources(
             self.hass.states.get, settings, self.runtime.device,
             self.hass.config.units.temperature_unit, now,
-            last_temperature=self.last_temperature,
+            cache=self.source_cache,
         )
         self.last_temperature = sources.temperature
         decision, strategy, manual = self.runtime.evaluate(sources, now, today, settings=settings)

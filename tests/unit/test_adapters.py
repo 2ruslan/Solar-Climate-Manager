@@ -133,6 +133,49 @@ class SourceTests(unittest.TestCase):
                     "grid_power_entity", "soc_entity"):
             self.assertEqual(snapshot.readings[key].status, "valid")
 
+    def test_outage_cache_expires_recovers_and_preserves_report_time(self):
+        cache = sources.SourceCache()
+
+        def capture():
+            return sources.read_sources(
+                self.states.get, self.settings,
+                models.DeviceConfig.from_settings(self.settings), "°C", self.now,
+                cache=cache,
+            )
+
+        original = capture()
+        self.now += timedelta(days=2)
+        self.assertEqual(capture().energy, original.energy)
+        self.put("sensor.pv", "unavailable")
+        del self.states["sensor.room"]
+        self.assertEqual(capture().energy.pv, 2800)
+        self.now += timedelta(seconds=599)
+        held = capture()
+        self.assertEqual(held.temperature, 20)
+        self.assertEqual(held.readings["pv_power_entity"].reported_at, original.captured_at)
+        self.now += timedelta(seconds=1)
+        self.assertIsNone(capture().energy.pv)
+        self.assertIsNone(capture().temperature)
+        self.now += timedelta(seconds=30)
+        self.assertIsNone(capture().energy.pv)
+        self.put("sensor.pv", "700", unit_of_measurement="W")
+        self.assertEqual(capture().energy.pv, 700)
+        self.put("sensor.pv", "unknown")
+        self.assertEqual(capture().energy.pv, 700)
+        self.settings["pv_power_entity"] = "sensor.other"
+        self.assertIsNone(capture().energy.pv)
+
+    def test_cache_does_not_mask_invalid_values_or_climate_unavailability(self):
+        cache = sources.SourceCache()
+        args = (self.states.get, self.settings,
+                models.DeviceConfig.from_settings(self.settings), "°C", self.now)
+        sources.read_sources(*args, cache=cache)
+        self.put("sensor.pv", "nan", unit_of_measurement="W")
+        self.put("climate.ac", "unavailable")
+        snapshot = sources.read_sources(*args, cache=cache)
+        self.assertIsNone(snapshot.energy.pv)
+        self.assertFalse(snapshot.climate_valid)
+
     def test_cached_temperature_retains_source_status_and_compensation(self):
         expected_target = self.capture().ac_target_temperature
         for value, status in (("unavailable", "unavailable"), ("nan", "invalid")):

@@ -80,10 +80,10 @@ async def test_shared_forecast_changes_budget_and_can_be_removed(hass):
         assert device.runtime_data.history.latest["state"]["generation_forecast"] == 2500
     hass.states.async_set("sensor.forecast", "unavailable", {"unit_of_measurement": "kW"})
     await hass.async_block_till_done()
-    assert first.runtime_data.data["group_available_power"] == 1000
+    assert first.runtime_data.data["group_available_power"] == 1900
     for device in (first, second):
-        assert device.runtime_data.data["generation_forecast"] is None
-        assert device.runtime_data.history.latest["state"]["generation_forecast"] is None
+        assert device.runtime_data.data["generation_forecast"] == 2500
+        assert device.runtime_data.history.latest["state"]["generation_forecast"] == 2500
     form = await group_form(hass, first, "group_settings")
     values.pop("generation_forecast_entity")
     result = await submit(hass, form, values)

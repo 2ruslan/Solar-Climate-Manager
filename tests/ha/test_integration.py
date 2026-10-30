@@ -164,7 +164,7 @@ async def test_disabled_persists(hass):
     assert not entry.runtime_data.data["demand"]
 
 
-async def test_solar_sources_independent_of_temperature(hass):
+async def test_solar_sources_independent_of_temperature(hass, freezer):
     states(hass)
     hass.states.async_set("sensor.pv", "2.8", {"unit_of_measurement": "kW"})
     entry = MockConfigEntry(domain=DOMAIN, data={**inputs(), "pv_power_entity": "sensor.pv"})
@@ -175,6 +175,14 @@ async def test_solar_sources_independent_of_temperature(hass):
     assert entry.runtime_data.data["pv_power"] == 2800
     assert "forecast_power_now" not in entry.runtime_data.data
     hass.states.async_set("sensor.pv", "unavailable")
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["pv_power"] == 2800
+    freezer.tick(timedelta(seconds=599))
+    entry.runtime_data._evaluate()
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data["pv_power"] == 2800
+    freezer.tick(timedelta(seconds=1))
+    entry.runtime_data._evaluate()
     await hass.async_block_till_done()
     assert entry.runtime_data.data["pv_power"] is None
     assert entry.runtime_data.data["demand"]
@@ -218,7 +226,7 @@ async def test_optional_generation_forecast_options_reload_and_live_updates(hass
     assert entry.runtime_data.data["generation_forecast"] == 3800
     hass.states.async_set("sensor.forecast", "unavailable", {"unit_of_measurement": "kW"})
     await hass.async_block_till_done()
-    assert entry.runtime_data.data["generation_forecast"] is None
+    assert entry.runtime_data.data["generation_forecast"] == 3800
     form = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         form["flow_id"], grouped_input(entry, generation_forecast_entity=None))
