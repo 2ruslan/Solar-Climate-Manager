@@ -4,12 +4,19 @@ import asyncio
 import hashlib
 import json
 import logging
+import sqlite3
+from collections import deque
+from copy import deepcopy
+from dataclasses import asdict
+from datetime import timedelta
 from statistics import median
 from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from ..adapters.analysis_database import MAX_PAYLOAD, AnalysisDatabase
 from ..adapters.sources import climate_temperature
 from ..domain.power_analysis import Conditions, GroupAnalysis
 from ..model import temperature_celsius
@@ -26,6 +33,13 @@ class PowerAnalysis:
         self.error: str | None = None
         self.lock = asyncio.Lock()
         self.last_save = 0.0
+        self.database: AnalysisDatabase | None = None
+        self.pending: deque[tuple[str, str, float, float, str]] = deque(maxlen=120)
+        self.sql_lock = asyncio.Lock()
+        self.sql_task: asyncio.Task[None] | None = None
+        self.timer_unsub: Any = None
+        self.last_sql = 0.0
+        self.queued_minutes: dict[str, tuple[str, int]] = {}
 
     async def async_load(self) -> None:
         async with self.lock:
@@ -34,6 +48,7 @@ class PowerAnalysis:
             from homeassistant.helpers.storage import Store
 
             self.store = Store(self.hass, 1, "solar_climate_manager.power_analysis")
+            self.database = AnalysisDatabase(self.hass.config.path(".storage", "solar_climate_manager_analysis.sqlite"))
             try:
                 saved = await self.store.async_load()
                 if saved is not None and (not isinstance(saved, dict) or saved.get("version") != 1):
@@ -48,11 +63,38 @@ class PowerAnalysis:
                 self.error = "storage_error"
                 LOGGER.exception("Power analysis storage unavailable; control is unaffected")
             self.loaded = True
+            await self.async_process()
+
+    async def async_process(self, _time: Any = None) -> None:
+        async with self.sql_lock:
+            if self.error or self.database is None:
+                return
+            batch = list(self.pending)
+            self.pending.clear()
+            models = {k: (v.context, deepcopy(v.adaptive)) for k, v in self.groups.items()}
+            try:
+                updated = await self.hass.async_add_executor_job(
+                    self.database.exchange, batch, models, dt_util.utcnow().timestamp())
+                for key, (context, model) in updated.items():
+                    if key in self.groups and self.groups[key].context == context:
+                        self.groups[key].adaptive = model
+                if self.store is not None:
+                    await self.store.async_save(self.stored())
+            except (OSError, ValueError, sqlite3.Error, HomeAssistantError):
+                self.error = "storage_error"
+                LOGGER.exception("Analysis database unavailable; control is unaffected")
 
     def stored(self) -> dict[str, Any]:
         return {"version": 1, "groups": {k: v.stored() for k, v in self.groups.items()}}
 
     async def async_flush(self) -> None:
+        if self.timer_unsub:
+            self.timer_unsub()
+            self.timer_unsub = None
+        if self.sql_task:
+            await self.sql_task
+            self.sql_task = None
+        await self.async_process()
         if self.store is not None and self.error is None:
             try:
                 await self.store.async_save(self.stored())
@@ -62,7 +104,6 @@ class PowerAnalysis:
         for group in self.groups.values():
             group.reset_cycle()
             group.adaptive.reset("waiting_background")
-            group.adaptive.last_report = None
             group.last_report = group.last_sample = None
 
     def conditions(self, coordinator: Any, *, phase: str = "steady") -> Conditions | None:
@@ -133,12 +174,28 @@ class PowerAnalysis:
             elif watts is not None:
                 watts -= max(0, -snapshot.energy.battery)
         model.observe(now=snapshot.now, reported=snapshot.load_reported_at,
-                      watts=watts, members=readings, valid=valid)
+                      watts=watts, members=readings, valid=valid, adaptive=False)
+        stamp = snapshot.load_reported_at
+        if valid and stamp is not None and watts is not None and watts >= 0 and 0 <= snapshot.now-stamp <= 90:
+            key = (signature, int(stamp//60))
+            if self.queued_minutes.get(group.group_id) != key:
+                payload = json.dumps({k: asdict(v) if v else None for k, v in readings.items()}, allow_nan=False)
+                if len(payload.encode("utf-8")) <= MAX_PAYLOAD:
+                    self.pending.append((group.group_id, signature, stamp, watts, payload))
+                    self.queued_minutes[group.group_id] = key
+        else:
+            model.adaptive.status = "invalid_data"
         if group.policy.load_scope != "includes_all_members":
             model.status = "unsupported_load"
             model.adaptive.status = "unsupported_load"
         live_groups = {g.group_id for g in registry.groups}
         self.groups = {k: v for k, v in self.groups.items() if k in live_groups}
+        self.queued_minutes = {k: v for k, v in self.queued_minutes.items() if k in live_groups}
+        if self.timer_unsub is None:
+            self.timer_unsub = async_track_time_interval(self.hass, self.async_process, timedelta(minutes=5))
+        if snapshot.now-self.last_sql >= 300 and (self.sql_task is None or self.sql_task.done()):
+            self.last_sql = snapshot.now
+            self.sql_task = self.hass.async_create_task(self.async_process())
         if snapshot.now - self.last_save >= 60:
             self.last_save = snapshot.now
             self.store.async_delay_save(self.stored, 1)

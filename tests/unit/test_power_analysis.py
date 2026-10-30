@@ -26,7 +26,7 @@ class AdaptiveAnalysisTests(unittest.TestCase):
     def test_estimate_during_first_run_and_longer_than_six_hours(self):
         self.run_until(1050)
         view = self.model.view("ac", self.conditions, 1050)
-        self.assertEqual(view["windows"], 1)
+        self.assertGreaterEqual(view["windows"], 1)
         self.assertLess(view["low"], 600)
         self.assertGreater(view["high"], 600)
         self.run_until(24000, 1080)
@@ -34,9 +34,9 @@ class AdaptiveAnalysisTests(unittest.TestCase):
 
     def test_short_appliance_spike_is_filtered(self):
         self.run_until(900)
-        self.point(930, 5000)
-        self.run_until(1050, 960)
-        row = self.model.evidence["ac"][0]
+        self.point(960, 5000)
+        self.run_until(1080, 1020)
+        row = self.model.evidence["ac"][-1]
         self.assertLess(row["high"], 1000)
 
     def test_repetition_narrows_conflicts_and_age_widen(self):
@@ -52,36 +52,36 @@ class AdaptiveAnalysisTests(unittest.TestCase):
         aged = self.model.aggregate(repeated, 4020+86400)
         self.assertGreater(aged["high"]-aged["low"], narrow["high"]-narrow["low"])
 
-    def test_no_evidence_from_duplicates_overlap_or_missing_background(self):
+    def test_rough_evidence_without_background_and_no_duplicate_inflation(self):
         self.model = p.AdaptiveAnalysis()
         self.run_until(1200)
-        self.assertFalse(self.model.evidence)
+        view = self.model.view("ac", self.conditions, 1200)
+        self.assertEqual(view["low"], 0)
+        self.assertEqual(view["confidence"], "rough")
         self.setUp()
         self.run_until(900)
+        count = len(self.model.evidence["ac"])
         for _ in range(50):
             self.point(900)
-        self.assertFalse(self.model.evidence)
-        self.model.observe(901, 900, 1500, {"ac": self.conditions, "other": self.conditions}, True)
-        self.assertEqual(self.model.status, "multiple_running")
-        self.assertFalse(self.model.window)
-        self.run_until(1200, 930)
-        self.assertFalse(self.model.evidence)
+        self.assertEqual(len(self.model.evidence["ac"]), count)
+        self.model.observe(960, 960, 1500, {"ac": self.conditions, "other": self.conditions}, True)
+        self.assertEqual(self.model.status, "rough_interval")
+        self.assertEqual(self.model.evidence["other"][-1]["low"], 0)
 
-    def test_conditions_and_gap_restart_collection(self):
+    def test_condition_drift_keeps_collecting_and_gap_does_not_invent_duration(self):
         self.run_until(900)
         self.conditions = replace(self.conditions, fan="high")
-        self.point(930)
-        self.assertFalse(self.model.window)
-        self.assertEqual(self.model.status, "warming_up")
+        self.point(960)
+        self.assertEqual(self.model.evidence["ac"][-1]["conditions"]["fan"], "high")
         self.point(1200)
-        self.assertEqual(self.model.since, 1200)
+        self.assertEqual(self.model.evidence["ac"][-1]["seconds"], 0)
 
     def test_restore_validates_and_keeps_evidence_without_live_window(self):
         self.run_until(1050)
         saved = self.model.stored()
         saved["evidence"]["ac"].append({"time": float("nan")})
         restored = p.AdaptiveAnalysis.restore(saved, 1100)
-        self.assertEqual(len(restored.evidence["ac"]), 1)
+        self.assertEqual(len(restored.evidence["ac"]), len(self.model.evidence["ac"]))
         self.assertIsNone(restored.active)
         self.assertFalse(restored.window)
         self.assertEqual(restored.view("ac", replace(self.conditions, fan="high"), 1100)["windows"], 0)

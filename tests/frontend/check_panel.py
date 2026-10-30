@@ -173,8 +173,10 @@ def main():
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
             analysis.screenshot(path="/tmp/scm-adaptive-mobile.png")
-            page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.status='multiple_running';panel.refresh()")
-            expect(analysis).to_contain_text("окремі оцінки не оновлюються")
+            page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.status='rough_interval';fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.low=0;panel.refresh()")
+            expect(analysis).to_contain_text("Груба оцінка")
+            expect(analysis).to_contain_text("0 W – 780 W")
+            expect(analysis).to_contain_text("1440 записів на групу")
             page.evaluate("delete fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;panel.refresh()")
             page.set_viewport_size({"width": 1280, "height": 1080})
             page.get_by_role("tab", name="Налаштування", exact=True).click()

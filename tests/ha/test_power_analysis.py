@@ -1,6 +1,7 @@
 """Passive analysis observes actual states, persists, and never dispatches commands."""
 
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
 from test_integration import attach_energy_group, setup
@@ -95,4 +96,28 @@ async def test_analysis_storage_failure_does_not_block_existing_control(hass):
         await hass.async_block_till_done()
         assert any(c.args[1] == "set_temperature" for c in calls.call_args_list)
     assert manager.error is None
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_sqlite_produces_rough_profiles_without_off_baseline(hass, freezer):
+    entry = await install(hass)
+    manager = entry.runtime_data.group_manager
+    group_id = manager.repository.registry.groups[0].group_id
+    attrs = dict(hass.states.get("climate.test").attributes)
+    with patch.object(type(hass.services), "async_call") as calls:
+        for i in range(8):
+            freezer.tick(60)
+            hass.states.async_set("climate.test", "heat", {**attrs, "current_temperature": 20+i*.4})
+            hass.states.async_set("sensor.load", str(900 if i % 2 else 1300),
+                                  {"unit_of_measurement": "W"}, force_update=True)
+            await hass.async_block_till_done()
+        await manager.power_analysis.async_process()
+        adaptive = manager.power_analysis.view(group_id, entry.runtime_data)["adaptive"]
+        assert adaptive["profiles"]
+        assert adaptive["low"] == 0
+        assert adaptive["confidence"] == "rough"
+        database = manager.power_analysis.database
+        assert database is not None
+        assert await hass.async_add_executor_job(Path(database.path).exists)
+        calls.assert_not_called()
     assert await hass.config_entries.async_unload(entry.entry_id)

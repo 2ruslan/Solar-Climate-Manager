@@ -53,7 +53,7 @@ class Conditions:
 
 @dataclass
 class AdaptiveAnalysis:
-    """Provisional intervals from disjoint five-minute windows, never control inputs."""
+    """Minute observations with uncertain background, never control inputs."""
 
     background: list[tuple[float, float]] = field(default_factory=list)
     evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -75,71 +75,65 @@ class AdaptiveAnalysis:
                          for k, rows in self.evidence.items()}
 
     def observe(self, now: float, reported: float | None, watts: float | None,
-                members: dict[str, Conditions | None], valid: bool) -> None:
+                members: dict[str, Conditions | None], valid: bool,
+                historical: bool = False) -> None:
         self.prune(now)
-        if (not valid or not numeric(reported) or reported is None or not 0 <= now-reported <= 90
+        if (not valid or not numeric(reported) or reported is None
+                or not 0 <= now-reported <= (86400 if historical else 90)
                 or not numeric(watts) or watts is None or watts < 0):
             self.reset("invalid_data")
             return
-        running = {k: v for k, v in members.items() if v is not None}
-        if len(running) > 1:
-            self.reset("multiple_running")
+        if self.last_report is not None and reported-self.last_report < 60:
             return
-        # Transitions invalidate partial windows even when the meter has not reported yet.
-        if self.active is not None and self.active not in running:
-            self.reset("ready")
-        if self.last_report is not None and reported <= self.last_report:
-            return
-        if self.last_report is not None:
-            if reported-self.last_report > 90:
-                self.reset("data_gap")
-            elif reported-self.last_report < 30:
-                return
-        self.last_report = reported
-        if not running:
-            self.background.append((reported, watts))
-            self.status = "ready" if len(self.background) >= 3 else "waiting_background"
-            return
-        device, condition = next(iter(running.items()))
-        assert condition is not None
-        if self.active != device or self.condition is None or self.condition.bucket() != condition.bucket():
-            self.reset("warming_up")
-            self.active, self.since, self.condition = device, reported, condition
-        assert self.since is not None
-        if reported-self.since < 600:
-            self.status = "warming_up"
-            return
-        background = [(t, v) for t, v in self.background if reported-t <= 86400]
-        if len(background) < 3 or background[-1][0]-background[0][0] < 60:
-            self.status = "waiting_background"
+        seconds = min(60, max(0, reported-self.last_report)) if self.last_report is not None else 0
+        if self.last_report is not None and reported-self.last_report > 90:
+            seconds = 0
             self.window.clear()
+        self.last_report = reported
+        running = {k: v for k, v in members.items() if v is not None}
+        if not running:
+            if not any(t == reported for t, _ in self.background):
+                self.background.append((reported, watts))
+            self.window.clear()
+            self.active = None
+            self.status = "ready"
             return
+        # Smooth short spikes only across the same active membership. Temperature
+        # drift is evidence, not a reason to discard the last ten minutes.
+        active = "|".join(sorted(running))
+        if self.active != active:
+            self.window.clear()
+        self.active = active
         self.window.append((reported, watts))
-        self.status = "collecting_interval"
-        if self.window[-1][0]-self.window[0][0] < 300:
-            return
-        total = sorted(v for _, v in self.window)
+        self.window = self.window[-5:]
+        total = median(v for _, v in self.window)
+        background = [(t, v) for t, v in self.background if 0 <= now-t <= 86400]
         base = sorted(v for _, v in background)
-        # Quantiles suppress short appliance spikes; persistent appliances remain
-        # indistinguishable from AC load, so retain a nonzero uncertainty floor.
-        low_base, high_base = base[int((len(base)-1)*.1)], base[int((len(base)-1)*.9)]
-        low_total, high_total = total[int((len(total)-1)*.2)], total[int((len(total)-1)*.8)]
-        age = max(0, reported-background[-1][0])/3600
+        known_background = len(base) >= 3
+        low_base = base[int((len(base)-1)*.1)] if known_background else 0
+        high_base = base[min(len(base)-1, int((len(base)-1)*.9+.999))] if known_background else total
+        age = max(0, now-max(t for t, _ in background))/3600 if background else 24
         margin = 100 + age*25
-        low = max(0, low_total-high_base-margin)
-        high = max(low, high_total-low_base+margin)
-        if high <= 10000:
+        for device, condition in running.items():
+            assert condition is not None
+            # Simultaneous appliances are not identifiable without independent
+            # evidence. Retain broad bounds instead of inventing an equal split.
+            identified = known_background and len(running) == 1
+            low = max(0, total-high_base-margin) if identified else 0
+            high = max(low, total-low_base+margin) if identified else total+margin
+            high = min(10000, high)
+            low = min(low, high)
             rows = self.evidence.setdefault(device, [])
-            rows.append({"time": reported, "conditions": asdict(condition),
-                         "low": round(low, 1), "high": round(high, 1), "seconds": 300})
-            self.evidence[device] = rows[-2000:]
-            self.status = "interval_ready"
-        else:
-            self.status = "invalid_data"
-        self.window.clear()
+            if not rows or rows[-1]["time"] < reported:
+                rows.append({"time": reported, "conditions": asdict(condition),
+                             "low": round(low, 1), "high": round(high, 1),
+                             "seconds": seconds, "identified": identified})
+                self.evidence[device] = rows[-2000:]
+        self.status = "interval_ready" if known_background and len(running) == 1 else "rough_interval"
 
     def aggregate(self, rows: list[dict[str, Any]], now: float) -> dict[str, Any]:
-        recent = sorted(rows, key=lambda r: r["time"])[-60:]
+        independent = [r for r in rows if r.get("identified", True)]
+        recent = sorted(independent or rows, key=lambda r: r["time"])[-120:]
         centers = sorted((r["low"]+r["high"])/2 for r in recent)
         n = len(recent)
         # Repetition shrinks startup uncertainty, not the unexplained background range.
@@ -147,9 +141,12 @@ class AdaptiveAnalysis:
         half += min(1000, max(0, now-recent[-1]["time"])/86400*100)
         low = max(0, centers[int((n-1)*.1)]-half)
         high = centers[min(n-1, int((n-1)*.9+.999))]+half
+        if not independent:
+            low = 0
         return {"low": round(low, 1), "high": round(high, 1), "windows": n,
                 "minutes": sum(r["seconds"] for r in recent)/60,
-                "updated_at": recent[-1]["time"], "confidence": "provisional"}
+                "updated_at": recent[-1]["time"],
+                "confidence": "provisional" if independent else "rough"}
 
     def view(self, device: str, condition: Conditions | None, now: float) -> dict[str, Any]:
         self.prune(now)
@@ -179,7 +176,7 @@ class AdaptiveAnalysis:
                 "warmup_remaining": max(0, 600-(now-self.since)) if self.since is not None else None}
 
     def stored(self) -> dict[str, Any]:
-        return deepcopy({"background": self.background, "evidence": self.evidence})
+        return deepcopy({"background": [], "evidence": self.evidence, "last_report": self.last_report})
 
     @classmethod
     def restore(cls, data: Any, now: float) -> "AdaptiveAnalysis":
@@ -202,7 +199,8 @@ class AdaptiveAnalysis:
                     c = row.get("conditions")
                     if (not all(numeric(row.get(k)) for k in ("time", "low", "high", "seconds"))
                             or not 0 <= row["time"] <= now or not 0 <= row["low"] <= row["high"] <= 10000
-                            or row["seconds"] != 300 or not isinstance(c, dict)
+                            or not 0 <= row["seconds"] <= 300 or not isinstance(c, dict)
+                            or not isinstance(row.get("identified", True), bool)
                             or set(c) != {"mode", "fan", "indoor", "target", "outdoor", "phase"}
                             or c["mode"] not in ("heat", "cool") or not isinstance(c["fan"], str)
                             or len(c["fan"]) > 100 or c["phase"] != "steady"
@@ -211,6 +209,9 @@ class AdaptiveAnalysis:
                         continue
                     result.evidence.setdefault(device, []).append(deepcopy(row))
         result.prune(now)
+        stamp = data.get("last_report")
+        if stamp is not None and numeric(stamp) and 0 <= stamp <= now:
+            result.last_report = stamp
         return result
 
 
@@ -255,8 +256,10 @@ class GroupAnalysis:
                          for key, rows in self.profiles.items()}
 
     def observe(self, *, now: float, reported: float | None, watts: float | None,
-                members: dict[str, Conditions | None], valid: bool = True) -> None:
-        self.adaptive.observe(now, reported, watts, members, valid)
+                members: dict[str, Conditions | None], valid: bool = True,
+                adaptive: bool = True) -> None:
+        if adaptive:
+            self.adaptive.observe(now, reported, watts, members, valid)
         self.prune(now)
         if (not valid or not numeric(reported) or reported is None
                 or not 0 <= now - reported <= 90 or not numeric(watts)
