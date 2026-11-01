@@ -65,3 +65,18 @@ class AnalysisDatabaseTests(unittest.TestCase):
         with self.assertRaises(sqlite3.DatabaseError):
             self.db.exchange([], {}, 1000)
         self.assertEqual(Path(self.path).read_bytes(), b"not a sqlite database")
+
+    def test_later_night_background_refines_earlier_rough_samples(self):
+        c = p.Conditions("heat", "auto", 21, 24, 7)
+        payload = json.dumps({"ac": asdict(c)})
+        model = p.AdaptiveAnalysis()
+        models = {"g": ("v1", model)}
+        self.db.exchange([("g", "v1", t, 1000, payload) for t in range(0, 3600, 60)], models, 3600)
+        self.assertEqual(model.view("ac", c, 3600)["low"], 0)
+        self.db.exchange([("g", "v1", t, 300, '{"ac":null}') for t in range(3600, 7200, 60)], models, 7200)
+        view = model.view("ac", c, 7200)
+        self.assertGreater(view["low"], 400)
+        self.assertIn("later_background", view["reasons"])
+        self.assertEqual(len(model.evidence["ac"]), 60)
+        self.db.exchange([], models, 7200)
+        self.assertEqual(model.view("ac", c, 7200), view)

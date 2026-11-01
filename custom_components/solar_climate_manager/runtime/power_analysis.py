@@ -124,8 +124,6 @@ class PowerAnalysis:
             state = self.hass.states.get(settings["outdoor_temperature_entity"])
             if state and 0 <= dt_util.utcnow().timestamp() - state.last_reported.timestamp() <= 900:
                 outdoor = temperature_celsius(state.state, state.attributes.get("unit_of_measurement"))
-            if outdoor is None:
-                return None
         fan = climate.attributes.get("fan_mode", "unknown")
         return Conditions(mode, str(fan)[:100], indoor, target, outdoor, phase)
 

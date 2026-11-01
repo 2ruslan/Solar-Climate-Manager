@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from test_integration import attach_energy_group, setup
 
 from custom_components.solar_climate_manager.panel import async_overview
@@ -120,4 +121,56 @@ async def test_sqlite_produces_rough_profiles_without_off_baseline(hass, freezer
         assert database is not None
         assert await hass.async_add_executor_job(Path(database.path).exists)
         calls.assert_not_called()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.parametrize(("positive", "battery", "included"), [
+    ("charge", 800, True), ("discharge", -800, True),
+    ("discharge", 800, True), ("charge", 800, False),
+])
+async def test_analysis_charging_correction_applies_to_background_and_running(
+        hass, freezer, positive, battery, included):
+    entry = await install(hass)
+    manager = entry.runtime_data.group_manager
+    repository = manager.repository
+    group = repository.registry.groups[0]
+    await repository.async_update(lambda state: state.update(replace(
+        group, policy=replace(group.policy, battery_positive=positive,
+                              load_includes_battery_charging=included))))
+    await hass.async_block_till_done()
+    attrs = dict(hass.states.get("climate.test").attributes)
+    charging = battery if positive == "charge" else -battery
+    correction = max(0, charging) if included else 0
+    with patch.object(type(hass.services), "async_call") as calls:
+        for i in range(30):
+            freezer.tick(60)
+            hass.states.async_set("climate.test", "off" if i < 10 else "heat", attrs)
+            hass.states.async_set("sensor.battery", str(battery), {"unit_of_measurement": "W"}, force_update=True)
+            hass.states.async_set("sensor.load", str((300 if i < 10 else 1000)+correction),
+                                  {"unit_of_measurement": "W"}, force_update=True)
+            await hass.async_block_till_done()
+        await manager.power_analysis.async_process()
+        view = manager.power_analysis.view(group.group_id, entry.runtime_data)["adaptive"]
+        assert view["background_watts"] == 300
+        assert 0 < view["low"] < 700 < view["high"] < 1000
+        calls.assert_not_called()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_missing_outdoor_sensor_keeps_rough_analysis(hass, freezer):
+    entry = await install(hass)
+    entry.runtime_data.settings["outdoor_temperature_entity"] = "sensor.missing_outdoor"
+    manager = entry.runtime_data.group_manager
+    group = manager.repository.registry.groups[0]
+    attrs = dict(hass.states.get("climate.test").attributes)
+    for i in range(12):
+        freezer.tick(60)
+        hass.states.async_set("climate.test", "off" if i < 5 else "heat", attrs)
+        hass.states.async_set("sensor.load", "300" if i < 5 else "1000",
+                              {"unit_of_measurement": "W"}, force_update=True)
+        await hass.async_block_till_done()
+    await manager.power_analysis.async_process()
+    view = manager.power_analysis.view(group.group_id, entry.runtime_data)["adaptive"]
+    assert view["windows"] > 0
+    assert "missing_outdoor" in view["reasons"]
     assert await hass.config_entries.async_unload(entry.entry_id)

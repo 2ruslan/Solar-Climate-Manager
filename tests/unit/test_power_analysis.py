@@ -10,6 +10,36 @@ p = importlib.import_module("scm_adapter_test.domain.power_analysis")
 
 
 class AdaptiveAnalysisTests(unittest.TestCase):
+    def test_variable_overnight_background_produces_positive_lower_estimate(self):
+        self.model = p.AdaptiveAnalysis()
+        for i in range(480):
+            self.point(i*60, 2000 if i % 4 == 0 else 300+i % 50, False)
+        for i in range(480, 540):
+            self.point(i*60, 1000)
+        view = self.model.view("ac", self.conditions, 539*60)
+        self.assertGreater(view["low"], 400)
+        self.assertLess(view["low"], 700)
+        self.assertGreater(view["high"], 700)
+        self.assertEqual(view["confidence"], "low")
+        self.assertIn("noisy_background", view["reasons"])
+
+    def test_minute_jitter_does_not_drop_every_other_sample(self):
+        self.model = p.AdaptiveAnalysis()
+        for t in (61, 120, 182, 241, 300):
+            self.point(t)
+        self.assertEqual(len(self.model.evidence["ac"]), 5)
+        self.assertGreater(sum(r["seconds"] for r in self.model.evidence["ac"]), 230)
+
+    def test_temperature_conflict_reduces_confidence_without_clipping_bounds(self):
+        self.model.evidence["ac"] = [
+            {"time": 1000+i*60, "conditions": asdict(replace(self.conditions, indoor=indoor)),
+             "low": low, "high": low+100, "seconds": 60, "identified": True, "reasons": []}
+            for i, (indoor, low) in enumerate([(23, 1600), (19, 400)])]
+        profiles = self.model.view("ac", self.conditions, 1100)["profiles"]
+        for profile in profiles:
+            self.assertIn("temperature_conflict", profile["reasons"])
+            self.assertEqual(profile["confidence"], "low")
+
     def test_outdoor_bins_use_explicit_five_degree_intervals(self):
         for temperature, bounds in [(12.47, (10, 15)), (12.83, (10, 15)),
                                     (15, (15, 20)), (-.1, (-5, 0)), (-5, (-5, 0)),

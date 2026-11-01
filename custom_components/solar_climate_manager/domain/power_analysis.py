@@ -91,10 +91,10 @@ class AdaptiveAnalysis:
                 or not numeric(watts) or watts is None or watts < 0):
             self.reset("invalid_data")
             return
-        if self.last_report is not None and reported-self.last_report < 60:
+        if self.last_report is not None and int(reported//60) <= int(self.last_report//60):
             return
         seconds = min(60, max(0, reported-self.last_report)) if self.last_report is not None else 0
-        if self.last_report is not None and reported-self.last_report > 90:
+        if self.last_report is not None and reported-self.last_report > 120:
             seconds = 0
             self.window.clear()
         self.last_report = reported
@@ -118,9 +118,13 @@ class AdaptiveAnalysis:
         background = [(t, v) for t, v in self.background if 0 <= now-t <= RAW_RETENTION]
         base = sorted(v for _, v in background)
         known_background = len(base) >= 3
-        low_base = base[int((len(base)-1)*.1)] if known_background else 0
-        high_base = base[min(len(base)-1, int((len(base)-1)*.9+.999))] if known_background else total
-        age = max(0, now-max(t for t, _ in background))/3600 if background else 24
+        # Typical off load rather than the upper tail of other appliances.
+        # Later off observations can refine earlier estimates, at lower confidence.
+        low_base = base[int((len(base)-1)*.2)] if known_background else 0
+        high_base = base[min(len(base)-1, int((len(base)-1)*.6+.999))] if known_background else total
+        age = min(abs(reported-t) for t, _ in background)/3600 if background else 48
+        noisy = bool(base and base[int((len(base)-1)*.9)]-base[int((len(base)-1)*.1)]
+                     > max(200, median(base)*.5))
         margin = 100 + age*25
         for device, condition in running.items():
             assert condition is not None
@@ -133,7 +137,23 @@ class AdaptiveAnalysis:
             low = min(low, high)
             rows = self.evidence.setdefault(device, [])
             if not rows or rows[-1]["time"] < reported:
+                reasons = []
+                if not known_background:
+                    reasons.append("no_background")
+                elif len(base) < 30:
+                    reasons.append("few_background")
+                if noisy:
+                    reasons.append("noisy_background")
+                if age > 3:
+                    reasons.append("old_background")
+                if background and not any(t <= reported for t, _ in background):
+                    reasons.append("later_background")
+                if len(running) > 1:
+                    reasons.append("multiple_running")
+                if condition.outdoor is None:
+                    reasons.append("missing_outdoor")
                 rows.append({"time": reported, "conditions": asdict(condition),
+                             "reasons": reasons, "model_version": 2,
                              "low": round(low, 1), "high": round(high, 1),
                              "seconds": seconds, "identified": identified})
                 self.evidence[device] = rows[-2000:]
@@ -151,10 +171,19 @@ class AdaptiveAnalysis:
         high = centers[min(n-1, int((n-1)*.9+.999))]+half
         if not independent:
             low = 0
+        reasons = sorted({reason for r in recent for reason in r.get("reasons", ["legacy_model"])})
+        if n < 20:
+            reasons.append("few_samples")
+        if centers[-1]-centers[0] > max(300, median(centers)*.5):
+            reasons.append("variable_power")
+        if now-recent[-1]["time"] > 86400:
+            reasons.append("old_samples")
+        confidence = "rough" if not independent else "low" if reasons else "moderate"
         return {"low": round(low, 1), "high": round(high, 1), "windows": n,
+                "reasons": reasons,
                 "minutes": sum(r["seconds"] for r in recent)/60,
                 "updated_at": recent[-1]["time"],
-                "confidence": "provisional" if independent else "rough"}
+                "confidence": confidence}
 
     def view(self, device: str, condition: Conditions | None, now: float) -> dict[str, Any]:
         self.prune(now)
@@ -167,22 +196,41 @@ class AdaptiveAnalysis:
                      **self.aggregate(values, now)}
                     for values in buckets.values()]
         profiles.sort(key=lambda r: r["updated_at"], reverse=True)
+        profiles = profiles[:100]
+        for profile in profiles:
+            c = Conditions(**profile["conditions"])
+            for other in profiles:
+                o = Conditions(**other["conditions"])
+                comparable = (c.mode == o.mode and c.fan == o.fan and c.phase == o.phase
+                              and c.outdoor is not None and o.outdoor is not None
+                              and (c.outdoor_range() == o.outdoor_range() or abs(c.outdoor-o.outdoor) <= 2))
+                if comparable and c.delta < o.delta and profile["low"] > other["high"]:
+                    for item in (profile, other):
+                        item["confidence"] = "low"
+                        if "temperature_conflict" not in item["reasons"]:
+                            item["reasons"].append("temperature_conflict")
+        profiles.sort(key=lambda r: r["updated_at"], reverse=True)
         matches = [r for r in rows if condition and condition.similar(Conditions(**r["conditions"]))]
-        result = self.aggregate(matches, now) if matches else {
+        result: dict[str, Any] = self.aggregate(matches, now) if matches else {
             "low": None, "high": None, "windows": 0, "minutes": 0,
             "updated_at": None, "confidence": "insufficient"}
         # Soft monotonicity: contradictions expand uncertainty; never fabricate a
         # strict physical law or tighten a bound from a neighbouring temperature.
         if matches and condition:
             for row in profiles:
-                other = Conditions(**row["conditions"])
-                if condition.similar(other):
-                    if other.delta < condition.delta:
+                other_condition = Conditions(**row["conditions"])
+                if condition.similar(other_condition):
+                    if "temperature_conflict" in row["reasons"]:
+                        result["confidence"] = "low"
+                        if "temperature_conflict" not in result["reasons"]:
+                            result["reasons"].append("temperature_conflict")
+                    if other_condition.delta < condition.delta:
                         result["high"] = max(result["high"], row["high"])
-                    elif other.delta > condition.delta:
+                    elif other_condition.delta > condition.delta:
                         result["low"] = min(result["low"], row["low"])
         return {**result, "profiles": profiles[:100], "status": self.status,
                 "background_samples": len(self.background),
+                "background_watts": round(median(v for _, v in self.background), 1) if self.background else None,
                 "warmup_remaining": max(0, 600-(now-self.since)) if self.since is not None else None}
 
     def stored(self) -> dict[str, Any]:
@@ -211,6 +259,8 @@ class AdaptiveAnalysis:
                             or not 0 <= row["time"] <= now or not 0 <= row["low"] <= row["high"] <= 10000
                             or not 0 <= row["seconds"] <= 300 or not isinstance(c, dict)
                             or not isinstance(row.get("identified", True), bool)
+                            or not isinstance(row.get("reasons", []), list)
+                            or any(not isinstance(r, str) or len(r) > 64 for r in row.get("reasons", []))
                             or set(c) != {"mode", "fan", "indoor", "target", "outdoor", "phase"}
                             or c["mode"] not in ("heat", "cool") or not isinstance(c["fan"], str)
                             or len(c["fan"]) > 100 or c["phase"] != "steady"
