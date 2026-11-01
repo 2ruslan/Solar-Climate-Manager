@@ -945,7 +945,8 @@ export class SolarClimatePanel extends HTMLElement {
         const scroll=el("div",null,"history-scroll"),table=el("table",null,"interval-profiles"),head=el("tr"),thead=el("thead"),body=el("tbody");
         for(const title of uk?["Температура AC → уставка","Режим / вентилятор","Зовні","Нижня оцінка","Верхня оцінка","Зразків / хв","Довіра / причини","Оновлено"]:["AC temperature → setpoint","Mode / fan","Outside","Lower estimate","Upper estimate","Samples / min","Confidence / reasons","Updated"])head.append(el("th",title));
         thead.append(head);table.append(thead);
-        for(const row of a.profiles) {
+        const profiles=[...a.profiles].sort((left,right)=>left.conditions.indoor-right.conditions.indoor || left.conditions.target-right.conditions.target);
+        for(const row of profiles) {
           const c=row.conditions,tr=el("tr");
           for(const value of [`${c.indoor} → ${c.target} °C`,`${c.mode} / ${c.fan}`,row.outdoor_range?`${row.outdoor_range[0]} … < ${row.outdoor_range[1]} °C`:this.t("missing"),this.watts(row.low),this.watts(row.high),`${row.windows} / ${Math.round(row.minutes*10)/10}`,qualityText(row),new Date(row.updated_at*1000).toLocaleString(this._lang)])tr.append(el("td",value));
           body.append(tr);

@@ -173,6 +173,14 @@ def main():
             expect(analysis.locator(".interval-profiles tbody")).not_to_contain_text("12.83")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("Низька: мінливий фон, суперечність між температурами")
             expect(analysis).to_contain_text("Типовий фон (медіана): 325 W")
+            page.evaluate("""()=>{
+              const a=fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;
+              const row=a.profiles[0];
+              a.profiles=[[26,27],[21,27],[21,24],[18,23]].map(([indoor,target])=>({...row,conditions:{...row.conditions,indoor,target}}));
+              return panel.refresh();
+            }""")
+            expect(analysis.locator(".interval-profiles tbody tr td:first-child")).to_have_text(
+                ["18 → 23 °C", "21 → 24 °C", "21 → 27 °C", "26 → 27 °C"])
             analysis.screenshot(path="/tmp/scm-adaptive-desktop.png")
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
