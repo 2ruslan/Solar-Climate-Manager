@@ -76,7 +76,22 @@ class AnalysisDatabaseTests(unittest.TestCase):
         self.db.exchange([("g", "v1", t, 300, '{"ac":null}') for t in range(3600, 7200, 60)], models, 7200)
         view = model.view("ac", c, 7200)
         self.assertGreater(view["low"], 400)
+        self.assertEqual(view["estimate"], 700)
         self.assertIn("later_background", view["reasons"])
         self.assertEqual(len(model.evidence["ac"]), 60)
         self.db.exchange([], models, 7200)
         self.assertEqual(model.view("ac", c, 7200), view)
+
+    def test_previous_model_is_replayed_to_add_central_estimate(self):
+        c = p.Conditions("heat", "auto", 21, 24, 7)
+        model = p.AdaptiveAnalysis()
+        models = {"g": ("v1", model)}
+        payload = json.dumps({"ac": asdict(c)})
+        self.db.exchange([("g", "v1", t, 300, '{"ac":null}') for t in (0, 60, 120)]
+                         + [("g", "v1", 180, 1000, payload)], models, 180)
+        row = model.evidence["ac"][0]
+        row.pop("estimate")
+        row["model_version"] = 2
+        self.db.exchange([], models, 180)
+        self.assertEqual(model.view("ac", c, 180)["estimate"], 700)
+        self.assertEqual(len(model.evidence["ac"]), 1)

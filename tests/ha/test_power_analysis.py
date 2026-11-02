@@ -152,6 +152,7 @@ async def test_analysis_charging_correction_applies_to_background_and_running(
         await manager.power_analysis.async_process()
         view = manager.power_analysis.view(group.group_id, entry.runtime_data)["adaptive"]
         assert view["background_watts"] == 300
+        assert view["estimate"] == 700
         assert 0 < view["low"] < 700 < view["high"] < 1000
         calls.assert_not_called()
     assert await hass.config_entries.async_unload(entry.entry_id)

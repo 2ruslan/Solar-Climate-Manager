@@ -10,6 +10,26 @@ p = importlib.import_module("scm_adapter_test.domain.power_analysis")
 
 
 class AdaptiveAnalysisTests(unittest.TestCase):
+    def test_central_estimate_uses_background_even_with_zero_lower_bound(self):
+        self.model = p.AdaptiveAnalysis()
+        for t, watts in enumerate((300, 450, 600)):
+            self.point(t*60, watts, False)
+        self.point(180, 700)
+        view = self.model.view("ac", self.conditions, 180)
+        self.assertEqual(view["low"], 0)
+        self.assertEqual(view["estimate"], 250)
+        self.assertNotEqual(view["estimate"], (view["low"]+view["high"])/2)
+        restored = p.AdaptiveAnalysis.restore(self.model.stored(), 180)
+        self.assertEqual(restored.view("ac", self.conditions, 180)["estimate"], 250)
+
+    def test_no_central_estimate_without_background_or_with_multiple_devices(self):
+        self.model = p.AdaptiveAnalysis()
+        self.point(180, 700)
+        self.assertIsNone(self.model.view("ac", self.conditions, 180)["estimate"])
+        self.model.background = [(0, 300), (60, 300), (120, 300)]
+        self.model.observe(240, 240, 1200, {"other": self.conditions, "ac": self.conditions}, True)
+        self.assertIsNone(self.model.view("other", self.conditions, 240)["estimate"])
+
     def test_variable_overnight_background_produces_positive_lower_estimate(self):
         self.model = p.AdaptiveAnalysis()
         for i in range(480):

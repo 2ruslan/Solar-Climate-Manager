@@ -153,7 +153,8 @@ class AdaptiveAnalysis:
                 if condition.outdoor is None:
                     reasons.append("missing_outdoor")
                 rows.append({"time": reported, "conditions": asdict(condition),
-                             "reasons": reasons, "model_version": 2,
+                             "reasons": reasons, "model_version": 3,
+                             "estimate": round(min(10000, max(0, total-median(base))), 1) if identified else None,
                              "low": round(low, 1), "high": round(high, 1),
                              "seconds": seconds, "identified": identified})
                 self.evidence[device] = rows[-2000:]
@@ -179,7 +180,12 @@ class AdaptiveAnalysis:
         if now-recent[-1]["time"] > 86400:
             reasons.append("old_samples")
         confidence = "rough" if not independent else "low" if reasons else "moderate"
+        estimates = [r["estimate"] for r in recent if r.get("identified", True) and numeric(r.get("estimate"))]
+        estimate = round(median(estimates), 1) if estimates else None
+        if estimate is not None:
+            low, high = min(low, estimate), max(high, estimate)
         return {"low": round(low, 1), "high": round(high, 1), "windows": n,
+                "estimate": estimate,
                 "reasons": reasons,
                 "minutes": sum(r["seconds"] for r in recent)/60,
                 "updated_at": recent[-1]["time"],
@@ -212,7 +218,7 @@ class AdaptiveAnalysis:
         profiles.sort(key=lambda r: r["updated_at"], reverse=True)
         matches = [r for r in rows if condition and condition.similar(Conditions(**r["conditions"]))]
         result: dict[str, Any] = self.aggregate(matches, now) if matches else {
-            "low": None, "high": None, "windows": 0, "minutes": 0,
+            "low": None, "high": None, "estimate": None, "windows": 0, "minutes": 0,
             "updated_at": None, "confidence": "insufficient"}
         # Soft monotonicity: contradictions expand uncertainty; never fabricate a
         # strict physical law or tighten a bound from a neighbouring temperature.
@@ -259,6 +265,8 @@ class AdaptiveAnalysis:
                             or not 0 <= row["time"] <= now or not 0 <= row["low"] <= row["high"] <= 10000
                             or not 0 <= row["seconds"] <= 300 or not isinstance(c, dict)
                             or not isinstance(row.get("identified", True), bool)
+                            or (row.get("estimate") is not None and
+                                (not numeric(row["estimate"]) or not 0 <= row["estimate"] <= 10000))
                             or not isinstance(row.get("reasons", []), list)
                             or any(not isinstance(r, str) or len(r) > 64 for r in row.get("reasons", []))
                             or set(c) != {"mode", "fan", "indoor", "target", "outdoor", "phase"}

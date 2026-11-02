@@ -57,7 +57,7 @@ class AnalysisDatabase:
                     (stamp, watts, json.loads(members)) for stamp, watts, members in records]
                 background = [(t, w) for t, w, m in decoded if not any(m.values())]
                 changed = background != model.background
-                outdated = any(r.get("model_version") != 2 for rows in model.evidence.values() for r in rows
+                outdated = any(r.get("model_version") != 3 for rows in model.evidence.values() for r in rows
                                if now-RAW_RETENTION <= r["time"])
                 if decoded and (changed or outdated):
                     # Recompute the bounded raw horizon when off evidence arrives.

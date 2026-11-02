@@ -176,11 +176,15 @@ def main():
             page.evaluate("""()=>{
               const a=fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;
               const row=a.profiles[0];
+              a.estimate=600;
+              row.estimate=600;
               a.profiles=[[26,27],[21,27],[21,24],[18,23]].map(([indoor,target])=>({...row,conditions:{...row.conditions,indoor,target}}));
               return panel.refresh();
             }""")
             expect(analysis.locator(".interval-profiles tbody tr td:first-child")).to_have_text(
                 ["18 → 23 °C", "21 → 24 °C", "21 → 27 °C", "26 → 27 °C"])
+            expect(analysis).to_contain_text("Орієнтовне споживання: ≈ 600 W")
+            expect(analysis.locator(".interval-profiles tbody tr td:nth-child(4)")).to_have_text(["≈ 600 W"]*4)
             analysis.screenshot(path="/tmp/scm-adaptive-desktop.png")
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
