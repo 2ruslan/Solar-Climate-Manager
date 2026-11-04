@@ -64,6 +64,8 @@ class AdaptiveAnalysis:
     """Minute observations with uncertain background, never control inputs."""
 
     background: list[tuple[float, float]] = field(default_factory=list)
+    transitions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    transition_count: int = 0
     evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     status: str = "waiting_background"
     last_report: float | None = None
@@ -161,6 +163,8 @@ class AdaptiveAnalysis:
         self.status = "interval_ready" if known_background and len(running) == 1 else "rough_interval"
 
     def aggregate(self, rows: list[dict[str, Any]], now: float) -> dict[str, Any]:
+        transition_rows = [r for r in rows if r.get("source") == "ruptures"]
+        rows = transition_rows or rows
         independent = [r for r in rows if r.get("identified", True)]
         recent = sorted(independent or rows, key=lambda r: r["time"])[-120:]
         centers = sorted((r["low"]+r["high"])/2 for r in recent)
@@ -186,6 +190,7 @@ class AdaptiveAnalysis:
             low, high = min(low, estimate), max(high, estimate)
         return {"low": round(low, 1), "high": round(high, 1), "windows": n,
                 "estimate": estimate,
+                "source": "ruptures" if transition_rows else "background",
                 "reasons": reasons,
                 "minutes": sum(r["seconds"] for r in recent)/60,
                 "updated_at": recent[-1]["time"],
@@ -194,6 +199,9 @@ class AdaptiveAnalysis:
     def view(self, device: str, condition: Conditions | None, now: float) -> dict[str, Any]:
         self.prune(now)
         rows = self.evidence.get(device, [])
+        local = [r for r in self.transitions.get(device, []) if 0 <= now-r["time"] <= RAW_RETENTION]
+        local_times = {r["time"] for r in local}
+        rows = sorted([r for r in rows if r["time"] not in local_times]+local, key=lambda r: r["time"])
         buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for row in rows:
             buckets.setdefault(Conditions(**row["conditions"]).bucket(), []).append(row)
@@ -236,6 +244,7 @@ class AdaptiveAnalysis:
                         result["low"] = min(result["low"], row["low"])
         return {**result, "profiles": profiles[:100], "status": self.status,
                 "background_samples": len(self.background),
+                "transition_count": self.transition_count,
                 "background_watts": round(median(v for _, v in self.background), 1) if self.background else None,
                 "warmup_remaining": max(0, 600-(now-self.since)) if self.since is not None else None}
 

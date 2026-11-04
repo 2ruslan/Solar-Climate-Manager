@@ -1,4 +1,5 @@
 [tool.ruff]
+extend-exclude = ["custom_components/solar_climate_manager/ruptures_vendor"]
 target-version = "py312"
 line-length = 100
 
@@ -23,3 +24,7 @@ explicit_package_bases = true
 [[tool.mypy.overrides]]
 module = ["homeassistant.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["custom_components.solar_climate_manager.ruptures_vendor.*"]
+follow_imports = "skip"

@@ -77,7 +77,7 @@ class AnalysisDatabaseTests(unittest.TestCase):
         view = model.view("ac", c, 7200)
         self.assertGreater(view["low"], 400)
         self.assertEqual(view["estimate"], 700)
-        self.assertIn("later_background", view["reasons"])
+        self.assertEqual(view["source"], "ruptures")
         self.assertEqual(len(model.evidence["ac"]), 60)
         self.db.exchange([], models, 7200)
         self.assertEqual(model.view("ac", c, 7200), view)

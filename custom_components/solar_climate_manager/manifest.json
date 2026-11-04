@@ -8,5 +8,5 @@
   "iot_class": "calculated",
   "documentation": "https://github.com/2ruslan/Solar-Climate-Manager#readme",
   "codeowners": [],
-  "requirements": []
+  "requirements": ["numpy==2.3.2"]
 }

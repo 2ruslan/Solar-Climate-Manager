@@ -153,6 +153,7 @@ async def test_analysis_charging_correction_applies_to_background_and_running(
         view = manager.power_analysis.view(group.group_id, entry.runtime_data)["adaptive"]
         assert view["background_watts"] == 300
         assert view["estimate"] == 700
+        assert view["source"] == "ruptures"
         assert 0 < view["low"] < 700 < view["high"] < 1000
         calls.assert_not_called()
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -174,4 +175,17 @@ async def test_missing_outdoor_sensor_keeps_rough_analysis(hass, freezer):
     view = manager.power_analysis.view(group.group_id, entry.runtime_data)["adaptive"]
     assert view["windows"] > 0
     assert "missing_outdoor" in view["reasons"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_unchanged_outdoor_reading_has_no_expiration(hass, freezer):
+    entry = await install(hass)
+    coordinator = entry.runtime_data
+    coordinator.settings["outdoor_temperature_entity"] = "sensor.outdoor"
+    hass.states.async_set("sensor.outdoor", "7", {"unit_of_measurement": "°C"})
+    freezer.tick(86400)
+    analysis = coordinator.group_manager.power_analysis
+    assert analysis.conditions(coordinator).outdoor == 7
+    hass.states.async_set("sensor.outdoor", "unavailable")
+    assert analysis.conditions(coordinator).outdoor is None
     assert await hass.config_entries.async_unload(entry.entry_id)

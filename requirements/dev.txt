@@ -1,3 +1,4 @@
-# Shared lint dependency; unit tests use the standard library only.
+# Shared lint and analysis dependencies, including real detector tests.
+numpy==2.3.2
 ruff==0.17.0
 mypy==2.4.0

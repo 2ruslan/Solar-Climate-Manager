@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..domain.power_analysis import RAW_RETENTION, AdaptiveAnalysis, Conditions
+from .power_transitions import detect
 
 MAX_ROWS = 10000
 GROUP_ROWS = 2880
@@ -74,4 +75,5 @@ class AnalysisDatabase:
                                       {k: Conditions(**v) if v else None for k, v in readings.items()},
                                       True, historical=True)
                 model.prune(now)
+                model.transitions, model.transition_count = detect(decoded)
             return models
