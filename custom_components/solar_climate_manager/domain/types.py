@@ -34,6 +34,7 @@ class EnergyPolicyConfig:
     minimum_soc: float = 85
     restart_soc: float = 90
     grid_absence_delay: float = 600
+    deficit_delay: float = 0
     minimum_run_time: float = 600
     minimum_off_time: float = 600
     load_includes_ac: bool = True

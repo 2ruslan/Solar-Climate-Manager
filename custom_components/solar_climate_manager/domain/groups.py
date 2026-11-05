@@ -71,6 +71,7 @@ class GroupPolicy:
     minimum_soc: float = 85
     restart_soc: float = 90
     grid_absence_delay: float = 600
+    deficit_delay: float = 0
     load_includes_battery_charging: bool = False
     grid_on_means_available: bool = True
     battery_positive: Literal["charge", "discharge"] = "discharge"
@@ -83,6 +84,7 @@ class GroupPolicy:
             "minimum_soc",
             "restart_soc",
             "grid_absence_delay",
+            "deficit_delay",
         ):
             value = getattr(self, name)
             if (

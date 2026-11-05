@@ -79,6 +79,7 @@ def decide(
     grid_import_margin: float | None = None
     energy_allowed = False
     energy_reason = "invalid_energy_data"
+    grid_deficit = False
 
     def result(
         action: Action,
@@ -146,8 +147,7 @@ def decide(
         projected = snapshot.grid_power + (0 if observed_state.running else cfg.estimated_ac_power)
         grid_import_margin = round(limit - projected, 1)
         if grid_import_margin < 0:
-            energy_reason = "grid_import_limit"
-            return halt(energy_reason)
+            grid_deficit = True
 
     if snapshot.grid:
         state.grid_absent_since = None
@@ -181,21 +181,27 @@ def decide(
         energy_reason = "low_soc"
         return halt(energy_reason)
 
-    if snapshot.grid:
-        state.deficit_since = None
-    elif solar_margin is not None and solar_margin < 0:
+    if grid_deficit or (not snapshot.grid and solar_margin is not None and solar_margin < 0):
         if state.deficit_since is None:
             state.deficit_since = now
     else:
         state.deficit_since = None
-    shortage_left = 0 if state.deficit_since is not None else None
-    candidate = snapshot.grid or (solar_margin is not None and solar_margin >= 0)
+    shortage_left = (
+        remaining(now, state.deficit_since, cfg.deficit_delay)
+        if state.deficit_since is not None else None
+    )
+    candidate = not grid_deficit and (snapshot.grid or (solar_margin is not None and solar_margin >= 0))
 
     energy_allowed = bool(candidate)
     energy_reason = (
         "grid_ready" if snapshot.grid else "solar_ready" if candidate else "insufficient_surplus"
     )
     outage_deadline = None
+    if grid_deficit:
+        energy_reason = "grid_import_limit"
+        if not observed_state.running or shortage_left == 0:
+            return halt(energy_reason)
+        outage_deadline = shortage_left
     if observed_state.running and not snapshot.grid and shortage_left is not None:
         outage_left = remaining(now, state.grid_absent_since, cfg.grid_absence_delay)
         outage_deadline = max(shortage_left, outage_left)
@@ -215,7 +221,7 @@ def decide(
 
     if observed_state.running:
         reason = (
-            "outage_deficit"
+            ("grid_import_limit" if grid_deficit else "outage_deficit")
             if outage_deadline is not None
             else "temperature_maintenance"
             if not demand

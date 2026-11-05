@@ -114,7 +114,7 @@ export function historySummary(input, now, hours=12) {
   return {start,rows,totals,unknown:hours*3600-totals.covered};
 }
 const SHARED_SECTIONS = {
-  grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay"],
+  grid: ["grid_available_entity", "grid_on_means_available", "grid_power_entity", "grid_positive", "grid_import_limit_entity", "grid_absence_delay", "deficit_delay"],
   battery: ["soc_entity", "minimum_soc", "restart_soc", "battery_power_entity", "battery_positive"],
   solar: ["pv_power_entity", "generation_forecast_entity"],
   consumption: ["load_power_entity", "load_scope", "load_includes_battery_charging"],

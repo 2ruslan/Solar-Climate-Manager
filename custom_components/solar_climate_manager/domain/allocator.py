@@ -542,7 +542,8 @@ def allocate(
         outage_expired = (
             outage_since is not None and now - outage_since >= policy.grid_absence_delay
         )
-        if grid_deficit or min_run_done or outage_expired:
+        deficit_expired = deficit_since is not None and now - deficit_since >= policy.deficit_delay
+        if deficit_expired and (grid_deficit or min_run_done or outage_expired):
             decisions[request.device_id] = DeviceAllocation(
                 request.device_id, "stop", "grid_import_limit" if grid_deficit else "outage_deficit"
             )

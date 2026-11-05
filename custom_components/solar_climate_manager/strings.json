@@ -95,6 +95,7 @@
               "grid_power_entity": "Signed grid import/export power sensor",
               "grid_positive": "Positive grid power means",
               "grid_import_limit_entity": "Inverter grid import limit (number, optional; 0 = unlimited)",
+              "deficit_delay": "Power deficit shutdown delay (s; 0 = immediate)",
               "grid_absence_minutes": "Grid absence duration (minutes)"
             }
           },
@@ -184,6 +185,7 @@
       "advanced": {
         "title": "Advanced",
         "data": {
+          "deficit_delay": "Power deficit shutdown delay (s; 0 = immediate)",
           "grid_absence_minutes": "Grid absence duration (minutes)"
         },
         "description": "Other technical settings are fixed: balance is assessed over 10 minutes; short load spikes are tolerated."
@@ -261,6 +263,7 @@
         "data": {
           "minimum_soc": "Charge for stopping (%)",
           "restart_soc": "Charge for resuming (%)",
+          "deficit_delay": "Power deficit shutdown delay (s; 0 = immediate)",
           "grid_absence_delay": "Grid absence before overriding minimum run (s)"
         },
         "description": "Policy is shared by all members. At most one new start awaits confirmation at a time."
@@ -287,6 +290,7 @@
           "load_scope": "Total meter coverage",
           "minimum_soc": "Charge for stopping (%)",
           "restart_soc": "Charge for resuming (%)",
+          "deficit_delay": "Power deficit shutdown delay (s; 0 = immediate)",
           "grid_absence_delay": "Grid absence before overriding minimum run (s)"
         },
         "description": "Changes apply to every member of this energy group."

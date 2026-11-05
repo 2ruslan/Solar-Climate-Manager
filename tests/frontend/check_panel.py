@@ -250,10 +250,13 @@ def main():
             page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Мережа").click()
             page.locator('[name="grid_on_means_available"]').uncheck()
             page.locator('[name="grid_positive"]').select_option("export")
+            expect(page.locator('[name="deficit_delay"]')).to_have_value("0")
+            page.locator('[name="deficit_delay"]').fill("60")
             page.get_by_role("button", name="Зберегти", exact=True).click()
             saved = page.evaluate("calls.at(-1)[2]")
             assert saved["grid_on_means_available"] is False
             assert saved["grid_positive"] == "export"
+            assert saved["deficit_delay"] == 60
             assert "comfort" not in saved
             expect(page.locator('[name="grid_positive"]')).to_have_count(0)
             page.locator(".group").first.locator(":scope > details > summary").filter(has_text="Сонячна генерація").click()

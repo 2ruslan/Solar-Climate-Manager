@@ -31,6 +31,7 @@ SETTINGS_SECTIONS = {
         "grid_available_entity", "grid_on_means_available",
         "grid_power_entity", "grid_positive", "grid_import_limit_entity",
         "grid_absence_minutes",
+        "deficit_delay",
     ),
     "battery": (
         "soc_entity", "minimum_soc", "restart_soc",

@@ -20,6 +20,7 @@ POLICY_KEYS = {
     "minimum_soc",
     "restart_soc",
     "grid_absence_delay",
+    "deficit_delay",
 }
 ERRORS = {
     "switch_to_observation",

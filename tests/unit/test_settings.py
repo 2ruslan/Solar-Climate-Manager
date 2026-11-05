@@ -26,8 +26,8 @@ class SettingsTests(unittest.TestCase):
         )
         self.assertEqual(values["restart_soc"], 95)
 
-    def test_advanced_has_only_minutes_and_hidden_timing_is_fixed(self):
-        self.assertEqual(settings.ADVANCED_KEYS, {"grid_absence_minutes"})
+    def test_advanced_has_energy_delays_and_hidden_timing_is_fixed(self):
+        self.assertEqual(settings.ADVANCED_KEYS, {"grid_absence_minutes", "deficit_delay"})
         defaults = {key: 600 for key in settings.FIXED_POLICY_KEYS}
         defaults["grid_absence_delay"] = 600
         result = settings.configuration_values(

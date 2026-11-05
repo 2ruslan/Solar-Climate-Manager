@@ -365,6 +365,28 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual([d.device_id for d in result.decisions if d.action == "stop"], ["0"])
         self.assertEqual(result.unmet_deficit_watts, 0)
 
+    def test_deficit_delay_recovers_and_sheds_only_after_continuous_deficit(self):
+        for grid in (True, False):
+            with self.subTest(grid=grid):
+                policy = replace(self.policy, deficit_delay=60, grid_absence_delay=0)
+                requests = tuple(a.DeviceRequest(str(i), priority=i, running=True,
+                                 measured_watts=900, last_start=0) for i in range(2))
+                energy = replace(self.energy, grid=grid, load=2400, pv=2000,
+                                 grid_power=1400, grid_import_limit=1000, grid_limit_configured=True)
+                snapshot = replace(self.snapshot, requests=requests, energy=energy,
+                                   grid_reported_at=1000)
+                first = a.allocate(snapshot, self.state, policy)
+                self.assertTrue(all(d.action == "continue" for d in first.decisions))
+                before = a.allocate(replace(snapshot, now=1059), first.state, policy)
+                self.assertTrue(all(d.action == "continue" for d in before.decisions))
+                recovered = a.allocate(replace(snapshot, now=1060,
+                    energy=replace(energy, pv=3000, grid_power=900)), before.state, policy)
+                self.assertIsNone(recovered.state.deficit_since)
+                again = a.allocate(replace(snapshot, now=1070), recovered.state, policy)
+                self.assertTrue(all(d.action == "continue" for d in again.decisions))
+                expired = a.allocate(replace(snapshot, now=1130), again.state, policy)
+                self.assertEqual([d.device_id for d in expired.decisions if d.action == "stop"], ["0"])
+
     def test_outage_deficit_waits_for_delay_and_minimum_run_unless_outage_deadline(self):
         request = replace(self.requests[0], running=True, measured_watts=900, last_start=990)
         snapshot = replace(

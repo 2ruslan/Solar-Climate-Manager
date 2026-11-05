@@ -44,7 +44,7 @@ async def test_shared_settings_save_sources_and_policy_together(hass):
     form = await group_form(hass, first, "group_settings")
     values = {**asdict(before.sources), **asdict(before.policy)}
     values = {key: value for key, value in values.items() if value is not None}
-    values.update(minimum_soc=70, restart_soc=80, grid_on_means_available=False)
+    values.update(minimum_soc=70, restart_soc=80, grid_on_means_available=False, deficit_delay=60)
     values.pop("pv_power_entity")
     result = await submit(hass, form, values)
     assert result["type"] == "create_entry"
@@ -53,6 +53,7 @@ async def test_shared_settings_save_sources_and_policy_together(hass):
     assert after.sources.pv_power_entity is None
     assert after.policy.minimum_soc == 70
     assert after.policy.restart_soc == 80
+    assert after.policy.deficit_delay == 60
     assert after.policy.grid_on_means_available is False
     assert after.sources.load_power_entity == before.sources.load_power_entity
 

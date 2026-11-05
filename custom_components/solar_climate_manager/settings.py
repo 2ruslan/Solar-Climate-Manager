@@ -13,6 +13,7 @@ NUMERIC_SETTINGS = {
     "minimum_soc": (0, 99, 1, "%"),
     "restart_soc": (1, 100, 1, "%"),
     "grid_absence_minutes": (0, 120, 1, "min"),
+    "deficit_delay": (0, 7200, 1, "s"),
 }
 BOOLEAN_SETTINGS = [
     "load_includes_ac",
@@ -20,7 +21,7 @@ BOOLEAN_SETTINGS = [
     "grid_on_means_available",
 ]
 
-ADVANCED_KEYS = {"grid_absence_minutes"}
+ADVANCED_KEYS = {"grid_absence_minutes", "deficit_delay"}
 FIXED_POLICY_KEYS = {
     "minimum_run_time",
     "minimum_off_time",

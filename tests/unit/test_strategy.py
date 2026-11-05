@@ -50,6 +50,35 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(0).action, "start")
         self.assertEqual(self.decide(60).action, "continue")
 
+    def test_deficit_delay_resets_on_recovery_and_expires_at_boundary(self):
+        for grid in (True, False):
+            with self.subTest(grid=grid):
+                self.setUp()
+                self.cfg.update(deficit_delay=60, grid_absence_delay=0)
+                self.start_solar()
+                deficit = replace(self.snapshot, grid=grid, pv=0, grid_power=1100,
+                                  grid_import_limit=1000, grid_limit_configured=True)
+                self.assertEqual(self.decide(100, deficit).seconds_to_stop, 60)
+                self.assertEqual(self.decide(159, deficit).action, "continue")
+                self.assertEqual(self.decide(160).action, "continue")
+                self.assertIsNone(self.state.deficit_since)
+                self.assertEqual(self.decide(170, deficit).seconds_to_stop, 60)
+                self.assertEqual(self.decide(229, deficit).action, "continue")
+                self.assertEqual(self.decide(230, deficit).action, "stop")
+
+    def test_deficit_delay_does_not_bypass_protection_or_allow_start(self):
+        self.cfg.update(deficit_delay=60)
+        deficit = replace(self.snapshot, grid=True, grid_power=1100,
+                          grid_import_limit=1000, grid_limit_configured=True)
+        self.assertEqual(self.decide(0, deficit).action, "wait")
+        self.start_solar()
+        self.assertEqual(self.decide(100, deficit).action, "continue")
+        self.assertEqual(self.decide(101, deficit, enabled=False).reason, "disabled")
+        self.setUp()
+        self.cfg.update(deficit_delay=60)
+        self.start_solar()
+        self.assertEqual(self.decide(100, replace(self.snapshot, pv=0, soc=10)).reason, "low_soc")
+
     def test_forecast_adds_only_positive_delta_to_solar_budget(self):
         for forecast, action in (
             (2000, "start"), (1000, "wait"), (500, "wait"),
