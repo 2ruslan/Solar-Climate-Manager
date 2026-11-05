@@ -933,73 +933,33 @@ export class SolarClimatePanel extends HTMLElement {
       const reasons={no_background:["немає фону","no off baseline"],few_background:["мало фонових показів","few baseline samples"],noisy_background:["мінливий фон","variable baseline"],old_background:["давній фон","old baseline"],later_background:["фон після роботи AC","baseline after AC operation"],multiple_running:["кілька AC працюють","multiple ACs running"],missing_outdoor:["немає зовнішньої температури","missing outdoor temperature"],few_samples:["мало зразків","few samples"],variable_power:["мінлива потужність","variable power"],old_samples:["давні зразки","old samples"],legacy_model:["попередня модель","previous model"],temperature_conflict:["суперечність між температурами","temperature profile conflict"]};
       const qualityText=row=>`${quality[row.confidence]?.[uk?0:1] || row.confidence || this.t("missing")}${row.reasons?.length?`: ${row.reasons.map(r=>reasons[r]?.[uk?0:1] || r).join(", ")}`:""}`;
       Object.assign(reasons,{transition_estimate:["оцінка за переходами AC","AC transition estimate"],single_transition:["лише один перехід","single transition only"],startup:["запуск AC","AC startup"]});
-      const method=row=>row.source==="ruptures"?"ruptures":(uk?"Загальний фон":"Global baseline");
-      const states={waiting_background:["Очікування першого пакета спостережень","Waiting for the first observation batch"],ready:["Фон накопичується; очікування роботи кондиціонера","Collecting off baseline; waiting for AC operation"],warming_up:["Стабілізація: 10 хв після початку спостереження або зміни умов","Settling: 10 min after observation starts or conditions change"],collecting_interval:["Збір п’ятихвилинного вікна","Collecting a five-minute window"],rough_interval:["Груба оцінка: недостатньо фону або працюють кілька кондиціонерів","Rough estimate: insufficient baseline or multiple ACs running"],interval_ready:["Попередній діапазон оновлено","Provisional interval updated"],multiple_running:["Кілька кондиціонерів працюють; окремі оцінки не оновлюються","Multiple ACs running; individual estimates paused"],invalid_data:["Дані відсутні або застарілі","Missing or stale data"],data_gap:["Перерва в даних; стабілізація починається заново","Data gap; settling restarts"],unsupported_load:["Лічильник має включати всі кондиціонери групи","Meter must include all group ACs"],storage_error:["Помилка збереження аналізу","Analysis storage error"]};
-      card.append(el("p",uk?"Лише аналіз — не впливає на керування. Попередні межі, не гарантований діапазон і не вимірювання окремим лічильником.":"Analysis only — does not affect control. Provisional bounds, not guaranteed or separately metered.","subtle"));
-      card.append(el("p",states[a.status]?.[uk?0:1] || a.status));
-      card.append(el("p",`${uk?"Оцінка для поточних умов":"Current conditions estimate"}: ${Number.isFinite(a.low)?`${this.watts(a.low)} – ${this.watts(a.high)}`:this.t("missing")} · ${uk?"Попередня":"Provisional"}`));
-      card.append(el("p",`${uk?"Орієнтовне споживання":"Estimated consumption"}: ${Number.isFinite(a.estimate)?`≈ ${this.watts(a.estimate)}`:this.t("missing")}`));
-      card.append(el("p",`${uk?"Метод":"Method"}: ${method(a)} · ${uk?"Виявлених переходів у групі":"Detected group transitions"}: ${a.transition_count || 0}`));
-      card.append(el("p",uk?"ruptures шукає зміни навантаження біля ввімкнення та вимкнення AC. Для підтверджених переходів використовується місцевий фон; якщо перехід нечіткий, залишається оцінка за загальним фоном. Одночасне перемикання інших приладів може впливати на результат.":"ruptures detects load changes near AC start/stop. Detected transitions use a local baseline; unclear transitions retain the global baseline estimate. Simultaneous appliance changes may affect results.","subtle"));
-      card.append(el("p",uk?"Орієнтовне споживання — навантаження будинку після корекції заряджання мінус фон: місцевий для ruptures або загальний для резервної оцінки. У профілі показано медіану цих оцінок. Це не середина меж і не показ окремого лічильника; без фону або незалежних спостережень оцінка відсутня.":"Estimated consumption is house load after charging correction minus the baseline: local for ruptures or global for fallback estimates. Each profile shows the median of these estimates. It is not the interval midpoint or a separate meter reading; without baseline or independent observations it is unavailable.","subtle"));
-      card.append(el("p",`${uk?"Зразків / хвилин спостережень":"Samples / observed minutes"}: ${a.windows} / ${Math.round(a.minutes*10)/10} · ${uk?"Показів фону":"Off baseline samples"}: ${a.background_samples}`));
-      card.append(el("p",`${uk?"Типовий фон (медіана)":"Typical baseline (median)"}: ${this.watts(a.background_watts)} · ${uk?"Довіра":"Confidence"}: ${qualityText(a)}`));
-      card.append(el("p",uk?"Фон збирається весь час, коли всі AC групи вимкнені, включно з ніччю. Нові фонові дані уточнюють оцінки за останні 48 годин. Використовується типовий діапазон фону (20–60-й перцентилі), а не його піки. Заряджання віднімається, якщо воно включене в лічильник за налаштуванням групи. Нульова нижня межа означає невизначеність, а не нульове споживання AC.":"Baseline is collected whenever all group ACs are off, including overnight. New baseline data refines the last 48h of estimates. The typical baseline range (20th–60th percentiles) excludes its peaks. Charging is subtracted when the group setting says it is included in the load meter. A zero lower bound means uncertainty, not zero AC consumption.","subtle"));
-      if(a.status==="warming_up" && Number.isFinite(a.warmup_remaining))card.append(el("p",`${uk?"До збору вікна":"Until window collection"}: ${Math.ceil(a.warmup_remaining/60)} ${uk?"хв":"min"}`));
-      card.append(el("p",uk?"Оновлення пакетами приблизно раз на 5 хв. SQLite зберігає лише 48 год сирих даних: до 2880 записів на групу, до 10 000 загалом. Без достатнього фону нижня межа — 0 Вт. Короткі стрибки згладжуються; тривала робота інших приладів може впливати на оцінку.":"Updates in batches about every 5 min. SQLite retains only 48h of raw data: up to 2880 rows per group and 10,000 total. Without enough baseline evidence the lower bound is 0 W. Short spikes are smoothed; sustained appliance loads can bias estimates.","subtle"));
-      if(a.profiles?.length) {
+      const hasEstimate=a.source==="ruptures" && Number.isFinite(a.estimate);
+      const profiles=(a.profiles || []).filter(row=>row.source==="ruptures" && Number.isFinite(row.estimate)).sort((left,right)=>left.conditions.indoor-right.conditions.indoor || left.conditions.target-right.conditions.target);
+      const errors={invalid_data:["Дані відсутні або некоректні","Missing or invalid data"],unsupported_load:["Лічильник має включати всі кондиціонери групи","Meter must include all group ACs"],storage_error:["Помилка збереження аналізу","Analysis storage error"],analysis_error:["Помилка аналізу; керування працює незалежно","Analysis error; control operates independently"]};
+      card.append(el("p",uk?"Лише аналіз — не впливає на керування. Оцінка за змінами навантаження біля ввімкнення та вимкнення AC.":"Analysis only — does not affect control. Estimates use load changes near AC start/stop.","subtle"));
+      if(errors[a.status])card.append(el("p",errors[a.status][uk?0:1]));
+      card.append(el("p",`${uk?"Орієнтовне споживання":"Estimated consumption"}: ${hasEstimate?`≈ ${this.watts(a.estimate)}`:this.t("missing")}`));
+      card.append(el("p",`${uk?"Метод":"Method"}: ruptures · ${uk?"Виявлених переходів у групі":"Detected group transitions"}: ${a.transition_count || 0}`));
+      if(hasEstimate) {
+        card.append(el("p",`${uk?"Зразків / хвилин спостережень":"Samples / observed minutes"}: ${a.windows} / ${Math.round(a.minutes*10)/10} · ${uk?"Довіра":"Confidence"}: ${qualityText(a)}`));
+      } else card.append(el("p",uk?"Для поточних умов ще немає оцінки ruptures. Потрібні придатні спостереження біля ввімкнення або вимкнення AC.":"No ruptures estimate for current conditions yet. Suitable observations near AC start or stop are needed."));
+      card.append(el("p",uk?"Заряджання віднімається, якщо воно включене в споживання за налаштуванням групи. Місцевий фон оцінюється біля переходів AC. Одночасне перемикання інших приладів може впливати на результат.":"Charging is subtracted when included in load according to group settings. Local baseline is estimated near AC transitions. Simultaneous appliance changes may affect results.","subtle"));
+      card.append(el("p",uk?"Оновлення приблизно раз на 5 хв. Історія аналізу — 48 год: до 2880 записів на групу, до 10 000 загалом.":"Updates about every 5 min. Analysis history: 48h, up to 2880 rows per group and 10,000 total.","subtle"));
+      if(profiles.length) {
         const scroll=el("div",null,"history-scroll"),table=el("table",null,"interval-profiles"),head=el("tr"),thead=el("thead"),body=el("tbody");
-        for(const title of uk?["Температура AC → уставка","Режим / вентилятор","Зовні","Орієнтовне споживання","Нижня оцінка","Верхня оцінка","Зразків / хв","Довіра / причини","Оновлено"]:["AC temperature → setpoint","Mode / fan","Outside","Estimated consumption","Lower estimate","Upper estimate","Samples / min","Confidence / reasons","Updated"])head.append(el("th",title));
+        for(const title of uk?["Температура AC → уставка","Режим / вентилятор","Зовні","Орієнтовне споживання","Зразків / хв","Довіра / причини","Оновлено"]:["AC temperature → setpoint","Mode / fan","Outside","Estimated consumption","Samples / min","Confidence / reasons","Updated"])head.append(el("th",title));
         thead.append(head);table.append(thead);
-        const profiles=[...a.profiles].sort((left,right)=>left.conditions.indoor-right.conditions.indoor || left.conditions.target-right.conditions.target);
         for(const row of profiles) {
           const c=row.conditions,tr=el("tr");
-          for(const value of [`${c.indoor} → ${c.target} °C`,`${c.mode} / ${c.fan}`,row.outdoor_range?`${row.outdoor_range[0]} … < ${row.outdoor_range[1]} °C`:this.t("missing"),Number.isFinite(row.estimate)?`≈ ${this.watts(row.estimate)}`:this.t("missing"),this.watts(row.low),this.watts(row.high),`${row.windows} / ${Math.round(row.minutes*10)/10}`,`${method(row)} · ${qualityText(row)}`,new Date(row.updated_at*1000).toLocaleString(this._lang)])tr.append(el("td",value));
+          for(const value of [`${c.indoor} → ${c.target} °C`,`${c.mode} / ${c.fan}`,row.outdoor_range?`${row.outdoor_range[0]} … < ${row.outdoor_range[1]} °C`:this.t("missing"),`≈ ${this.watts(row.estimate)}`,`${row.windows} / ${Math.round(row.minutes*10)/10}`,qualityText(row),new Date(row.updated_at*1000).toLocaleString(this._lang)])tr.append(el("td",value));
           body.append(tr);
         }
         table.append(body);scroll.append(table);card.append(scroll);
-        card.append(el("p",uk?"Температури AC об’єднуються з кроком близько 2 °C; зовнішня — інтервалами по 5 °C від нуля. Нижня межа включена, верхня — ні: 12,47 і 12,83 °C належать до 10 … < 15 °C. Точні покази зберігаються. Різниця оцінок сама по собі не доводить вплив погоди.":"AC temperatures use about 2 °C bins; outdoor temperatures use 5 °C intervals anchored at zero. The lower bound is included, the upper excluded: 12.47 and 12.83 °C both belong to 10 … < 15 °C. Exact readings are retained. Differences in estimates alone do not establish a weather effect.","subtle"));
-      } else card.append(el("p",uk?"Профілі ще не зібрано. Причину очікування наведено вище.":"No profiles collected yet. See the waiting reason above."));
+      } else card.append(el("p",uk?"Профілі ruptures ще не зібрано.":"No ruptures profiles collected yet."));
       return card;
     }
-    const statuses={
-      waiting_background:["Потрібен стабільний фон перед запуском","Waiting for a stable off baseline"],
-      ready:["Фон зібрано; очікування циклу","Baseline ready; waiting for a cycle"],
-      checking_background:["Перевірка фону після вимкнення","Checking the off baseline"],
-      collecting:["Збір профілю; очікування завершення циклу","Collecting; waiting for cycle completion"],
-      settling:["Стабілізація після зміни режиму","Settling after a setting change"],
-      multiple_running:["Кілька кондиціонерів працюють: внески неоднозначні","Multiple ACs running: contributions are ambiguous"],
-      invalid_data:["Недостатньо актуальних даних","Missing or stale data"],
-      data_gap:["Перерва в даних; потрібен новий цикл","Data gap; a new cycle is needed"],
-      background_changed:["Цикл відхилено: змінився фон будинку","Cycle rejected: house background changed"],
-      overlapping_cycle:["Цикл відхилено: перекриття запусків","Cycle rejected: overlapping starts"],
-      cycle_too_long:["Цикл понад 6 годин не використано","Cycle longer than 6 hours excluded"],
-      unsupported_load:["Потрібне навантаження, що включає всі кондиціонери","Load must include every AC"],
-      storage_error:["Сховище аналізу недоступне","Analysis storage unavailable"],
-      analysis_error:["Помилка аналізу; керування працює незалежно","Analysis error; control operates independently"],
-    };
-    card.append(el("p",uk?"Лише аналіз — не впливає на керування. Оцінка за лічильником будинку, не окреме вимірювання кондиціонера.":"Analysis only — does not affect control. Estimated from the house meter, not a dedicated AC measurement.","subtle"));
-    card.append(el("p",statuses[analysis.status]?.[uk?0:1] || analysis.status));
-    const confidence={insufficient:uk?"Недостатньо даних":"Insufficient data",low:uk?"Низька":"Low",moderate:uk?"Помірна":"Moderate"};
-    card.append(el("p",`${uk?"Оцінка для поточних умов":"Estimate for current conditions"}: ${this.watts(analysis.watts)} · ${uk?"Якість":"Quality"}: ${confidence[analysis.confidence] || analysis.confidence}`));
-    if(Number.isFinite(analysis.low))card.append(el("p",`${uk?"Діапазон спостережень (10–90%), не гарантія":"Observed range (10–90%), not a guarantee"}: ${this.watts(analysis.low)} – ${this.watts(analysis.high)}`));
-    card.append(el("p",`${uk?"Відповідних циклів / усього":"Matching / total cycles"}: ${analysis.matching_cycles} / ${analysis.cycles} · ${uk?"Відхилених циклів групи":"Rejected group cycles"}: ${analysis.rejected_cycles}`));
-    if(analysis.updated_at)card.append(el("p",`${this.t("lastUpdate")}: ${new Date(analysis.updated_at*1000).toLocaleString(this._lang)}`,"subtle"));
-    const conditions=analysis.conditions;
-    if(conditions)card.append(el("p",`${conditions.mode} · ${conditions.indoor} → ${conditions.target} °C · ${conditions.fan} · ${conditions.phase==="startup"?(uk?"Після запуску":"After startup"):(uk?"Усталена робота":"Steady operation")}`));
-    if(analysis.profiles?.length) {
-      const scroll=el("div",null,"history-scroll");
-      const table=el("table");const head=el("tr");
-      for(const title of uk?["Час","Режим / вентилятор","Температура AC → уставка","Зовні","Фаза","Оцінка"]:["Time","Mode / fan","AC temperature → setpoint","Outside","Phase","Estimate"])head.append(el("th",title));
-      const thead=el("thead");thead.append(head);table.append(thead);
-      const body=el("tbody");
-      for(const row of analysis.profiles.slice(-50).reverse()) {
-        const c=row.conditions;const tr=el("tr");
-        for(const value of [new Date(row.time*1000).toLocaleString(this._lang),`${c.mode} / ${c.fan}`,`${c.indoor} → ${c.target} °C`,c.outdoor===null?"—":`${c.outdoor} °C`,c.phase==="startup"?(uk?"Запуск":"Startup"):(uk?"Усталена":"Steady"),this.watts(row.watts)])tr.append(el("td",value));
-        body.append(tr);
-      }
-      table.append(body);scroll.append(table);card.append(scroll);
-    }
+    card.append(el("p",uk?"Лише аналіз — не впливає на керування.":"Analysis only — does not affect control.","subtle"));
+    card.append(el("p",uk?"Профілі ruptures ще не зібрано.":"No ruptures profiles collected yet."));
     return card;
   }
   async submitFlow(input) {

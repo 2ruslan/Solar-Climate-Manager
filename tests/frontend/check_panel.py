@@ -150,11 +150,11 @@ def main():
             page.get_by_role("tab", name="Аналітика", exact=True).click()
             analysis = page.locator(".power-analysis").first
             expect(analysis).to_contain_text("Лише аналіз")
-            expect(analysis).to_contain_text("Помірна")
-            expect(analysis.locator("tbody")).to_contain_text("21 → 24 °C")
+            expect(analysis).to_contain_text("Профілі ruptures ще не зібрано")
+            expect(analysis.locator("tbody")).to_have_count(0)
             page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.matching_cycles=6;fixture.overview.devices.find(d=>d.group_id).power_analysis.cycles=6;panel.refresh()")
-            expect(analysis).to_contain_text("6 / 6")
-            expect(analysis.locator("tbody")).to_be_visible()
+            expect(analysis).not_to_contain_text("6 / 6")
+            expect(analysis).not_to_contain_text("550 W")
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
             analysis.screenshot(path="/tmp/scm-analysis-mobile.png")
@@ -162,17 +162,18 @@ def main():
             analysis.screenshot(path="/tmp/scm-analysis-desktop.png")
             page.evaluate("""()=>{
               const d=fixture.overview.devices.find(d=>d.group_id);
-              d.power_analysis.adaptive={status:'interval_ready',low:450,high:780,windows:6,minutes:30,background_samples:120,background_watts:325,confidence:'low',reasons:['noisy_background'],
-                profiles:[{conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:12.83},outdoor_range:[10,15],low:450,high:780,windows:6,minutes:30,confidence:'low',reasons:['noisy_background','temperature_conflict'],updated_at:1793023200}]};
+              d.power_analysis.adaptive={source:'ruptures',estimate:600,status:'interval_ready',low:450,high:780,windows:6,minutes:30,background_samples:120,background_watts:325,confidence:'low',reasons:['noisy_background'],
+                profiles:[{source:'ruptures',estimate:600,conditions:{mode:'heat',fan:'auto',indoor:21,target:24,outdoor:12.83},outdoor_range:[10,15],low:450,high:780,windows:6,minutes:30,confidence:'low',reasons:['noisy_background','temperature_conflict'],updated_at:1793023200}]};
               return panel.refresh();
             }""")
-            expect(analysis).to_contain_text("450 W – 780 W")
+            expect(analysis).not_to_contain_text("450 W – 780 W")
+            expect(analysis.locator(".interval-profiles thead")).not_to_contain_text("Нижня оцінка")
+            expect(analysis.locator(".interval-profiles thead")).not_to_contain_text("Верхня оцінка")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("21 → 24 °C")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("6 / 30")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("10 … < 15 °C")
             expect(analysis.locator(".interval-profiles tbody")).not_to_contain_text("12.83")
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("Низька: мінливий фон, суперечність між температурами")
-            expect(analysis).to_contain_text("Типовий фон (медіана): 325 W")
             page.evaluate("""()=>{
               const a=fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;
               const row=a.profiles[0];
@@ -182,21 +183,29 @@ def main():
               row.estimate=600;
               row.source='ruptures';
               a.profiles=[[26,27],[21,27],[21,24],[18,23]].map(([indoor,target])=>({...row,conditions:{...row.conditions,indoor,target}}));
+              a.profiles.push({...row,source:'background',estimate:9999});
               return panel.refresh();
             }""")
             expect(analysis.locator(".interval-profiles tbody tr td:first-child")).to_have_text(
                 ["18 → 23 °C", "21 → 24 °C", "21 → 27 °C", "26 → 27 °C"])
             expect(analysis).to_contain_text("Орієнтовне споживання: ≈ 600 W")
             expect(analysis).to_contain_text("Метод: ruptures · Виявлених переходів у групі: 2")
-            expect(analysis.locator(".interval-profiles tbody")).to_contain_text("ruptures · Низька")
+            expect(analysis.locator(".interval-profiles tbody")).to_contain_text("Низька")
+            expect(analysis).not_to_contain_text("9 999")
             expect(analysis.locator(".interval-profiles tbody tr td:nth-child(4)")).to_have_text(["≈ 600 W"]*4)
             analysis.screenshot(path="/tmp/scm-adaptive-desktop.png")
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("panel.shadowRoot.querySelector('.page').scrollWidth") <= 390
             analysis.screenshot(path="/tmp/scm-adaptive-mobile.png")
-            page.evaluate("fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.status='rough_interval';fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive.low=0;panel.refresh()")
-            expect(analysis).to_contain_text("Груба оцінка")
-            expect(analysis).to_contain_text("0 W – 780 W")
+            page.evaluate("""()=>{
+              const a=fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;
+              a.source='background';a.estimate=9999;a.profiles=a.profiles.filter(r=>r.source==='background');
+              return panel.refresh();
+            }""")
+            expect(analysis).to_contain_text("Для поточних умов ще немає оцінки ruptures")
+            expect(analysis).to_contain_text("Профілі ruptures ще не зібрано")
+            expect(analysis.locator(".interval-profiles")).to_have_count(0)
+            expect(analysis).not_to_contain_text("9 999")
             expect(analysis).to_contain_text("2880 записів на групу")
             page.evaluate("delete fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;panel.refresh()")
             page.set_viewport_size({"width": 1280, "height": 1080})
@@ -337,7 +346,7 @@ def main():
             expect(page.get_by_role("button", name="Create group", exact=True)).to_be_visible()
             page.locator(".power-analysis").first.locator("summary").click()
             expect(page.locator(".power-analysis").first).to_contain_text("Analysis only")
-            expect(page.locator(".power-analysis").first).to_contain_text("Moderate")
+            expect(page.locator(".power-analysis").first).to_contain_text("No ruptures profiles collected yet")
             page.locator(".power-analysis").first.locator("summary").click()
             page.get_by_role("button", name="History and diagnostics", exact=True).first.click()
             expect(page.get_by_role("heading", name="12-hour statistics")).to_be_visible()
