@@ -206,7 +206,7 @@ def main():
             expect(analysis).to_contain_text("Профілі ruptures ще не зібрано")
             expect(analysis.locator(".interval-profiles")).to_have_count(0)
             expect(analysis).not_to_contain_text("9 999")
-            expect(analysis).to_contain_text("2880 записів на групу")
+            expect(analysis).to_contain_text("30 днів: до 43 200 записів на групу")
             page.evaluate("delete fixture.overview.devices.find(d=>d.group_id).power_analysis.adaptive;panel.refresh()")
             page.set_viewport_size({"width": 1280, "height": 1080})
             page.get_by_role("tab", name="Налаштування", exact=True).click()

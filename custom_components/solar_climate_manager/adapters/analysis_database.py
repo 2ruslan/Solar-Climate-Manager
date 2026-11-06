@@ -6,13 +6,19 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from ..domain.power_analysis import RAW_RETENTION, AdaptiveAnalysis, Conditions
+from ..domain.power_analysis import (
+    BACKGROUND_RETENTION,
+    RAW_RETENTION,
+    AdaptiveAnalysis,
+    Conditions,
+)
 from .power_transitions import detect
 
-MAX_ROWS = 10000
-GROUP_ROWS = 2880
+MAX_ROWS = 86400
+GROUP_ROWS = 43200
 MAX_PAYLOAD = 2048
-MAX_PAGES = 8192  # 32 MiB with 4096-byte pages; journal is transient and bounded too.
+MAX_BYTES = 64 * 1024 * 1024  # Payload plus conservative row overhead; prune oldest first.
+MAX_PAGES = 65536  # 256 MiB hard ceiling, not preallocated; includes indexes/free pages.
 
 
 class AnalysisDatabase:
@@ -51,25 +57,32 @@ class AnalysisDatabase:
                                (group, group, GROUP_ROWS))
                 db.execute("DELETE FROM observations WHERE rowid NOT IN "
                            "(SELECT rowid FROM observations ORDER BY stamp DESC LIMIT ?)", (MAX_ROWS,))
+                db.execute("DELETE FROM observations WHERE rowid IN (SELECT rowid FROM "
+                           "(SELECT rowid, SUM(length(CAST(members AS BLOB))+length(group_id)+"
+                           "length(context)+128) OVER (ORDER BY stamp DESC, rowid DESC) AS bytes "
+                           "FROM observations) WHERE bytes > ?)", (MAX_BYTES,))
             for group, (context, model) in models.items():
                 records = db.execute("SELECT stamp, watts, members FROM observations "
                                      "WHERE group_id=? AND context=? ORDER BY stamp", (group, context)).fetchall()
                 decoded: list[tuple[float, float, dict[str, Any]]] = [
                     (stamp, watts, json.loads(members)) for stamp, watts, members in records]
-                background = [(t, w) for t, w, m in decoded if not any(m.values())]
+                # The hidden legacy model needs only a short baseline. Never replay
+                # a whole month through its per-sample background calculations.
+                fallback = [r for r in decoded if now-r[0] <= BACKGROUND_RETENTION]
+                background = [(t, w) for t, w, m in fallback if not any(m.values())][-2880:]
                 changed = background != model.background
                 outdated = any(r.get("model_version") != 3 for rows in model.evidence.values() for r in rows
                                if now-RAW_RETENTION <= r["time"])
-                if decoded and (changed or outdated):
+                if fallback and (changed or outdated):
                     # Recompute the bounded raw horizon when off evidence arrives.
                     # Older profiles remain; raw samples are never doubled.
-                    first = decoded[0][0]
+                    first = fallback[0][0]
                     model.evidence = {k: [r for r in rows if r["time"] < first]
                                       for k, rows in model.evidence.items()}
                     model.last_report = None
                     model.reset("waiting_background")
                 model.background = background
-                for stamp, watts, readings in decoded:
+                for stamp, watts, readings in fallback:
                     if model.last_report is None or stamp > model.last_report:
                         model.observe(now, stamp, watts,
                                       {k: Conditions(**v) if v else None for k, v in readings.items()},

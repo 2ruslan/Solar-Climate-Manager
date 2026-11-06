@@ -10,7 +10,8 @@ from statistics import median
 from typing import Any
 
 RETENTION = 30 * 86400
-RAW_RETENTION = 48 * 3600
+RAW_RETENTION = 30 * 86400
+BACKGROUND_RETENTION = 48 * 3600
 MAX_SAMPLES = 2000
 MAX_CYCLE = 6 * 3600
 OUTDOOR_STEP = 5
@@ -166,7 +167,9 @@ class AdaptiveAnalysis:
         transition_rows = [r for r in rows if r.get("source") == "ruptures"]
         rows = transition_rows or rows
         independent = [r for r in rows if r.get("identified", True)]
-        recent = sorted(independent or rows, key=lambda r: r["time"])[-120:]
+        recent = sorted(independent or rows, key=lambda r: r["time"])
+        if not transition_rows:
+            recent = recent[-120:]
         centers = sorted((r["low"]+r["high"])/2 for r in recent)
         n = len(recent)
         # Repetition shrinks startup uncertainty, not the unexplained background range.
@@ -183,7 +186,11 @@ class AdaptiveAnalysis:
             reasons.append("variable_power")
         if now-recent[-1]["time"] > 86400:
             reasons.append("old_samples")
-        confidence = "rough" if not independent else "low" if reasons else "moderate"
+        cycles = len({r["cycle"] for r in recent if "cycle" in r})
+        if transition_rows and cycles < 3:
+            reasons.append("few_cycles")
+        penalties = [reason for reason in reasons if reason != "transition_estimate"]
+        confidence = "rough" if not independent else "low" if penalties else "moderate"
         estimates = [r["estimate"] for r in recent if r.get("identified", True) and numeric(r.get("estimate"))]
         estimate = round(median(estimates), 1) if estimates else None
         if estimate is not None:
@@ -191,6 +198,7 @@ class AdaptiveAnalysis:
         return {"low": round(low, 1), "high": round(high, 1), "windows": n,
                 "estimate": estimate,
                 "source": "ruptures" if transition_rows else "background",
+                "cycles": cycles,
                 "reasons": reasons,
                 "minutes": sum(r["seconds"] for r in recent)/60,
                 "updated_at": recent[-1]["time"],

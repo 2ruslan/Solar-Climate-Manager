@@ -4,7 +4,7 @@ from statistics import median
 from typing import Any
 
 Record = tuple[float, float, dict[str, Any]]
-MAX_EDGES = 96
+MAX_EDGES = 1440
 SIDE = 10
 
 
@@ -25,7 +25,10 @@ def detect(records: list[Record]) -> tuple[dict[str, list[dict[str, Any]]], int]
     states = [active(r) for r in records]
     edges = [i for i in range(1, len(records)) if states[i] != states[i-1]
              and ((not states[i-1] and len(states[i]) == 1)
-                  or (not states[i] and len(states[i-1]) == 1))][-MAX_EDGES:]
+                  or (not states[i] and len(states[i-1]) == 1))]
+    if len(edges) > MAX_EDGES:
+        # Retain coverage of the whole month, including the first and last edge.
+        edges = [edges[i*(len(edges)-1)//(MAX_EDGES-1)] for i in range(MAX_EDGES)]
     anchors: dict[tuple[int, int, str], list[tuple[float, float, float]]] = {}
     accepted = 0
     for edge in edges:
@@ -97,5 +100,6 @@ def detect(records: list[Record]) -> tuple[dict[str, list[dict[str, Any]]], int]
                 "low": round(max(0, estimate-margin), 1), "high": round(min(10000, estimate+margin), 1),
                 "seconds": min(60, stamp-records[i-1][0]) if i > start else 0,
                 "identified": True, "reasons": reasons, "source": "ruptures",
+                "cycle": records[start][0],
             })
-    return {k: sorted(rows, key=lambda r: r["time"])[-2000:] for k, rows in evidence.items()}, accepted
+    return {k: sorted(rows, key=lambda r: r["time"]) for k, rows in evidence.items()}, accepted

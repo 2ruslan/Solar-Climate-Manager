@@ -10,6 +10,18 @@ p = importlib.import_module("scm_adapter_test.domain.power_analysis")
 
 
 class AdaptiveAnalysisTests(unittest.TestCase):
+    def test_transition_method_is_not_a_confidence_penalty_and_month_is_used(self):
+        rows = [{"time": i*86400+j*60, "conditions": asdict(self.conditions), "low": 500,
+                 "high": 900, "estimate": 700, "identified": True, "source": "ruptures",
+                 "cycle": i*86400, "seconds": 60, "reasons": ["transition_estimate"]}
+                for i in range(30) for j in range(20)]
+        view = self.model.aggregate(rows, rows[-1]["time"])
+        self.assertEqual(view["windows"], 600)
+        self.assertEqual(view["cycles"], 30)
+        self.assertEqual(view["confidence"], "moderate")
+        one = self.model.aggregate(rows[-20:], rows[-1]["time"])
+        self.assertEqual(one["confidence"], "low")
+        self.assertIn("few_cycles", one["reasons"])
     def test_central_estimate_uses_background_even_with_zero_lower_bound(self):
         self.model = p.AdaptiveAnalysis()
         for t, watts in enumerate((300, 450, 600)):

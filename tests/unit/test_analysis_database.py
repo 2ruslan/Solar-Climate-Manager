@@ -8,6 +8,7 @@ import unittest
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import patch
 
 from test_groups import groups  # noqa: F401
 
@@ -28,12 +29,12 @@ class AnalysisDatabaseTests(unittest.TestCase):
 
     def test_retention_and_physical_space_reclaimed_without_new_samples(self):
         models = {"g": ("v1", p.AdaptiveAnalysis())}
-        rows = [("g", "v1", t, 300, '{"ac":null}') for t in range(0, 172801, 60)]
-        self.db.exchange(rows, models, 172800)
-        self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 2880)
+        rows = [("g", "v1", t, 300, '{"ac":null}') for t in range(0, p.RAW_RETENTION+1, 60)]
+        self.db.exchange(rows, models, p.RAW_RETENTION)
+        self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 43200)
         self.assertEqual(self.read("SELECT MIN(stamp) FROM observations")[0][0], 60)
         size = Path(self.path).stat().st_size
-        self.db.exchange([], models, 345601)
+        self.db.exchange([], models, 2*p.RAW_RETENTION+1)
         self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 0)
         self.assertLess(Path(self.path).stat().st_size, size)
         self.assertLess(size, 32*1024*1024)
@@ -41,8 +42,9 @@ class AnalysisDatabaseTests(unittest.TestCase):
     def test_global_row_limit_and_removed_group_cleanup(self):
         models = {f"g{i}": ("v1", p.AdaptiveAnalysis()) for i in range(20)}
         rows = [(key, "v1", t, 300, '{}') for key in models for t in range(0, 36000, 60)]
-        self.db.exchange(rows, models, 36000)
-        self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], dbmod.MAX_ROWS)
+        with patch.object(dbmod, "MAX_ROWS", 10000):
+            self.db.exchange(rows, models, 36000)
+        self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 10000)
         self.db.exchange([], {}, 36001)
         self.assertEqual(self.read("SELECT COUNT(*) FROM observations")[0][0], 0)
 
@@ -65,6 +67,25 @@ class AnalysisDatabaseTests(unittest.TestCase):
         with self.assertRaises(sqlite3.DatabaseError):
             self.db.exchange([], {}, 1000)
         self.assertEqual(Path(self.path).read_bytes(), b"not a sqlite database")
+
+    def test_payload_budget_prunes_oldest_records(self):
+        rows = [("g", "v1", t, 300, '{"ac":null}') for t in range(0, 1200, 60)]
+        with patch.object(dbmod, "MAX_BYTES", 1000):
+            self.db.exchange(rows, {"g": ("v1", p.AdaptiveAnalysis())}, 1200)
+        self.assertLessEqual(self.read("SELECT SUM(length(members)+length(group_id)+length(context)+128) FROM observations")[0][0], 1000)
+        self.assertEqual(self.read("SELECT MAX(stamp) FROM observations")[0][0], 1140)
+
+    def test_twenty_day_old_cycle_still_available_after_restart(self):
+        c = p.Conditions("heat", "high", 20, 24, 7)
+        payload = json.dumps({"ac": asdict(c)})
+        rows = [("g", "v1", i*60, 1000 if 10 <= i < 40 else 300,
+                 payload if 10 <= i < 40 else '{"ac":null}') for i in range(50)]
+        model = p.AdaptiveAnalysis()
+        self.db.exchange(rows, {"g": ("v1", model)}, 20*86400)
+        self.assertEqual(model.view("ac", c, 20*86400)["estimate"], 700)
+        restored = p.AdaptiveAnalysis.restore(model.stored(), 20*86400)
+        self.db.exchange([], {"g": ("v1", restored)}, 20*86400)
+        self.assertEqual(restored.view("ac", c, 20*86400)["source"], "ruptures")
 
     def test_later_night_background_refines_earlier_rough_samples(self):
         c = p.Conditions("heat", "auto", 21, 24, 7)
