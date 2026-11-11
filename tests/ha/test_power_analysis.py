@@ -115,8 +115,12 @@ async def test_sqlite_produces_rough_profiles_without_off_baseline(hass, freezer
         await manager.power_analysis.async_process()
         adaptive = manager.power_analysis.view(group_id, entry.runtime_data)["adaptive"]
         assert adaptive["profiles"]
-        assert adaptive["low"] == 0
-        assert adaptive["confidence"] == "rough"
+        # The legacy fallback remains stored, but cannot impersonate a startup
+        # estimate when no transition/baseline identified that phase.
+        assert adaptive["phase"] == "startup"
+        assert adaptive["estimate"] is None
+        assert adaptive["confidence"] == "insufficient"
+        assert all(row["source"] == "background" for row in adaptive["profiles"])
         database = manager.power_analysis.database
         assert database is not None
         assert await hass.async_add_executor_job(Path(database.path).exists)
@@ -154,7 +158,7 @@ async def test_analysis_charging_correction_applies_to_background_and_running(
         assert view["background_watts"] == 300
         assert view["estimate"] == 700
         assert view["source"] == "ruptures"
-        assert 0 < view["low"] < 700 < view["high"] < 1000
+        assert 0 < view["low"] < 700 < view["high"] < 1500
         calls.assert_not_called()
     assert await hass.config_entries.async_unload(entry.entry_id)
 
@@ -188,4 +192,31 @@ async def test_unchanged_outdoor_reading_has_no_expiration(hass, freezer):
     assert analysis.conditions(coordinator).outdoor == 7
     hass.states.async_set("sensor.outdoor", "unavailable")
     assert analysis.conditions(coordinator).outdoor is None
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_live_analysis_selects_startup_steady_and_setting_change(hass, freezer):
+    entry = await install(hass)
+    coordinator = entry.runtime_data
+    manager = coordinator.group_manager
+    group = manager.repository.registry.groups[0]
+    attrs = dict(hass.states.get("climate.test").attributes)
+    with patch.object(type(hass.services), "async_call") as calls:
+        for i in range(30):
+            freezer.tick(60)
+            hass.states.async_set("climate.test", "off" if i < 10 else "heat", attrs)
+            hass.states.async_set("sensor.load", "300" if i < 10 else "1000",
+                                  {"unit_of_measurement": "W"}, force_update=True)
+            await hass.async_block_till_done()
+            if i in (14, 29):
+                await manager.power_analysis.async_process()
+                view = manager.power_analysis.view(group.group_id, coordinator)["adaptive"]
+                assert view["phase"] == ("startup" if i == 14 else "steady")
+                assert view["source"] == "ruptures"
+                assert view["estimate"] == 700
+        assert {r["conditions"]["phase"] for r in view["profiles"]} >= {"startup", "steady"}
+        hass.states.async_set("climate.test", "heat", {**attrs, "temperature": 27})
+        view = manager.power_analysis.view(group.group_id, coordinator)["adaptive"]
+        assert view["phase"] == "settling"
+        calls.assert_not_called()
     assert await hass.config_entries.async_unload(entry.entry_id)

@@ -7,7 +7,7 @@ import logging
 import sqlite3
 from collections import deque
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import timedelta
 from statistics import median
 from typing import Any
@@ -203,7 +203,20 @@ class PowerAnalysis:
         now = dt_util.utcnow().timestamp()
         phase = "startup" if model.started is None or now - model.started < 600 else "steady"
         result = model.estimate(coordinator.device_id, self.conditions(coordinator, phase=phase), now)
-        result["adaptive"] = model.adaptive.view(coordinator.device_id, self.conditions(coordinator), now)
+        condition = self.conditions(coordinator)
+        climate = self.hass.states.get(coordinator.settings["climate_entity"])
+        if condition and climate and climate.state in ("heat", "cool"):
+            phase = "startup" if now-climate.last_changed.timestamp() < 600 else "steady"
+            latest = model.adaptive.transitions.get(coordinator.device_id, [])
+            if latest and 0 <= now-latest[-1]["time"] <= 300:
+                previous = latest[-1]["conditions"]
+                changed = any(previous[k] != getattr(condition, k) for k in ("mode", "fan", "target"))
+                if changed and now-climate.last_updated.timestamp() < 120:
+                    phase = "settling"
+                elif not changed and previous["phase"] == "unknown":
+                    phase = "unknown"
+            condition = replace(condition, phase=phase)
+        result["adaptive"] = model.adaptive.view(coordinator.device_id, condition, now)
         result["adaptive"]["status"] = self.error or result["adaptive"]["status"]
         result["status"] = self.error or result["status"]
         return result

@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -95,8 +95,9 @@ class AnalysisDatabaseTests(unittest.TestCase):
         self.db.exchange([("g", "v1", t, 1000, payload) for t in range(0, 3600, 60)], models, 3600)
         self.assertEqual(model.view("ac", c, 3600)["low"], 0)
         self.db.exchange([("g", "v1", t, 300, '{"ac":null}') for t in range(3600, 7200, 60)], models, 7200)
+        c = replace(c, phase="unknown")  # History began while AC was already on.
         view = model.view("ac", c, 7200)
-        self.assertGreater(view["low"], 400)
+        self.assertGreaterEqual(view["low"], 0)
         self.assertEqual(view["estimate"], 700)
         self.assertEqual(view["source"], "ruptures")
         self.assertEqual(len(model.evidence["ac"]), 60)

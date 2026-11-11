@@ -9,6 +9,8 @@ from math import floor, isfinite
 from statistics import median
 from typing import Any
 
+from .transition_profiles import summarize
+
 RETENTION = 30 * 86400
 RAW_RETENTION = 30 * 86400
 BACKGROUND_RETENTION = 48 * 3600
@@ -165,6 +167,8 @@ class AdaptiveAnalysis:
 
     def aggregate(self, rows: list[dict[str, Any]], now: float) -> dict[str, Any]:
         transition_rows = [r for r in rows if r.get("source") == "ruptures"]
+        if transition_rows:
+            return summarize(transition_rows, now)
         rows = transition_rows or rows
         independent = [r for r in rows if r.get("identified", True)]
         recent = sorted(independent or rows, key=lambda r: r["time"])
@@ -217,13 +221,15 @@ class AdaptiveAnalysis:
                      "outdoor_range": Conditions(**values[-1]["conditions"]).outdoor_range(),
                      **self.aggregate(values, now)}
                     for values in buckets.values()]
-        profiles.sort(key=lambda r: r["updated_at"], reverse=True)
+        profiles.sort(key=lambda r: (r.get("source") == "ruptures", r["updated_at"]), reverse=True)
         profiles = profiles[:100]
         for profile in profiles:
             c = Conditions(**profile["conditions"])
             for other in profiles:
                 o = Conditions(**other["conditions"])
                 comparable = (c.mode == o.mode and c.fan == o.fan and c.phase == o.phase
+                              and (profile.get("source") != "ruptures" or
+                                   profile["confidence"] == other["confidence"] == "moderate")
                               and c.outdoor is not None and o.outdoor is not None
                               and (c.outdoor_range() == o.outdoor_range() or abs(c.outdoor-o.outdoor) <= 2))
                 if comparable and c.delta < o.delta and profile["low"] > other["high"]:
@@ -251,6 +257,7 @@ class AdaptiveAnalysis:
                     elif other_condition.delta > condition.delta:
                         result["low"] = min(result["low"], row["low"])
         return {**result, "profiles": profiles[:100], "status": self.status,
+                "phase": condition.phase if condition else None,
                 "background_samples": len(self.background),
                 "transition_count": self.transition_count,
                 "background_watts": round(median(v for _, v in self.background), 1) if self.background else None,

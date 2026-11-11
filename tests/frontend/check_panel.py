@@ -182,6 +182,8 @@ def main():
               a.transition_count=2;
               row.estimate=600;
               row.source='ruptures';
+              a.phase='steady';a.cycles=4;a.supported_cycles=3;
+              row.conditions.phase='steady';row.cycles=4;row.supported_cycles=3;
               a.profiles=[[26,27],[21,27],[21,24],[18,23]].map(([indoor,target])=>({...row,conditions:{...row.conditions,indoor,target}}));
               a.profiles.push({...row,source:'background',estimate:9999});
               return panel.refresh();
@@ -190,6 +192,8 @@ def main():
                 ["18 → 23 °C", "21 → 24 °C", "21 → 27 °C", "26 → 27 °C"])
             expect(analysis).to_contain_text("Орієнтовне споживання: ≈ 600 W")
             expect(analysis).to_contain_text("Метод: ruptures · Виявлених переходів у групі: 2")
+            expect(analysis).to_contain_text("Незалежних циклів / узгоджених: 4 / 3")
+            expect(analysis.locator(".interval-profiles tbody tr td:nth-child(5)")).to_have_text(["Усталена робота"]*4)
             expect(analysis.locator(".interval-profiles tbody")).to_contain_text("Низька")
             expect(analysis).not_to_contain_text("9 999")
             expect(analysis.locator(".interval-profiles tbody tr td:nth-child(4)")).to_have_text(["≈ 600 W"]*4)
