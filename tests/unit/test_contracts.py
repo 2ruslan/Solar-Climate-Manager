@@ -74,6 +74,22 @@ class PolicyContractTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             running.running = False
 
+    def test_delayed_stop_report_counts_time_already_off(self):
+        running = models.ObservedDeviceState(True, 100)
+        for elapsed, expected in ((420, 180), (600, None), (3600, None)):
+            with self.subTest(elapsed=elapsed):
+                self.observed = running.observe(False, 200 + elapsed, changed_at=200)
+                result = self.decide(now=200 + elapsed).decision
+                self.assertEqual(self.observed.last_stop, 200)
+                self.assertEqual(result.seconds_to_start, expected)
+                self.assertEqual(result.action, "wait" if expected else "start")
+
+    def test_invalid_transition_time_does_not_bypass_pause(self):
+        running = models.ObservedDeviceState(True, 100)
+        for changed in (None, -1, 99, 1001, float("nan"), float("inf")):
+            with self.subTest(changed=changed):
+                self.assertEqual(running.observe(False, 1000, changed).last_stop, 1000)
+
     def test_store_v1_restore_preserves_cycle_and_resets_continuity(self):
         legacy = {
             "running": True, "last_start": 900, "last_stop": 100,

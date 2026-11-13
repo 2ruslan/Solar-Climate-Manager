@@ -335,6 +335,32 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(self.decide(121, grid).action, "continue")
         self.assertEqual(self.decide(240, grid).action, "continue")
 
+    def test_all_stop_reasons_count_elapsed_pause_before_recovery(self):
+        cases = (
+            (replace(self.snapshot, grid=False, pv=0), {}),
+            (replace(self.snapshot, grid=False, pv=0, soc=40), {}),
+            (replace(self.snapshot, schedule_allowed=False), {}),
+            (replace(self.snapshot, outdoor_block_reason="low_outdoor_temperature"), {}),
+            (replace(self.snapshot, temperature_valid=False), {}),
+            (replace(self.snapshot, battery=None), {}),
+            (replace(self.snapshot, grid=True, grid_limit_configured=True,
+                     grid_import_limit=100, grid_power=1000), {}),
+            (self.snapshot, {"enabled": False}),
+            (self.snapshot, {"manual": True}),
+        )
+        for blocked, flags in cases:
+            for elapsed in (70, 120, 3600):
+                with self.subTest(blocked=blocked, flags=flags, elapsed=elapsed):
+                    self.setUp()
+                    self.cfg["grid_absence_delay"] = 0
+                    self.observed = policy.ObservedDeviceState(True, 0)
+                    self.assertEqual(self.decide(100, blocked, **flags).action, "stop")
+                    self.decide(100 + elapsed - 1, blocked, **flags)
+                    self.assertEqual(self.observed.last_stop, 100)
+                    ready = self.decide(100 + elapsed, replace(self.snapshot, grid=True))
+                    self.assertEqual(ready.action, "wait" if elapsed < 120 else "start")
+                    self.assertEqual(ready.seconds_to_start, 120 - elapsed if elapsed < 120 else None)
+
     def test_manual_schedule_disabled(self):
         self.assertEqual(self.decide(0, manual=True).reason, "manual_pause")
         self.assertEqual(self.decide(0, enabled=False).reason, "disabled")

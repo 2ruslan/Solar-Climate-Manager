@@ -89,14 +89,26 @@ class ObservedDeviceState:
     last_start: float | None = None
     last_stop: float | None = None
 
-    def observe(self, running: bool, now: float) -> "ObservedDeviceState":
+    def observe(
+        self, running: bool, now: float, changed_at: float | None = None,
+    ) -> "ObservedDeviceState":
         if running == self.running:
             return self
+        # Use the physical report's transition time, not the time conditions
+        # recover or a delayed evaluation/reload finally processes that report.
+        previous = self.last_stop if running else self.last_start
+        transition = (
+            changed_at
+            if changed_at is not None and isfinite(changed_at)
+            and 0 <= changed_at <= now
+            and (previous is None or changed_at >= previous)
+            else now
+        )
         return replace(
             self,
             running=running,
-            last_start=now if running else self.last_start,
-            last_stop=self.last_stop if running else now,
+            last_start=transition if running else self.last_start,
+            last_stop=self.last_stop if running else transition,
         )
 
 

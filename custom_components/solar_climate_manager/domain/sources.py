@@ -31,3 +31,4 @@ class SourceSnapshot:
     climate_valid: bool
     running: bool | None
     energy: EnergySnapshot
+    climate_changed_at: float | None = None

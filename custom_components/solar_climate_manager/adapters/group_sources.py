@@ -62,6 +62,8 @@ def capture_group(
         climate = get_state(settings["climate_entity"])
         changed = getattr(climate, "last_changed", source.readings["climate_entity"].reported_at)
         observed = coordinator.runtime.observed
+        if source.running is not None:
+            observed = observed.observe(source.running, now.timestamp(), source.climate_changed_at)
         attempt = coordinator.commands.state.attempt
         requests.append(
             DeviceRequest(
@@ -88,12 +90,8 @@ def capture_group(
                 command_confirmed_at=attempt.confirmed_at
                 if attempt and attempt.service == "set_temperature" and attempt.service_status == "completed"
                 else None,
-                last_start=observed.last_start
-                if observed.running == source.running
-                else now.timestamp(),
-                last_stop=observed.last_stop
-                if observed.running == source.running
-                else now.timestamp(),
+                last_start=observed.last_start,
+                last_stop=observed.last_stop,
             )
         )
     if captured is None:

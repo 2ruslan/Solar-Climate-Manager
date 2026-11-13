@@ -247,6 +247,11 @@ def read_sources(
         climate_valid=climate_valid,
         running=climate.state != "off" if climate_available else None,
         energy=snapshot,
+        climate_changed_at=(
+            climate.last_changed.timestamp()
+            if climate_available and getattr(climate, "last_changed", None) is not None
+            else None
+        ),
     )
 
 

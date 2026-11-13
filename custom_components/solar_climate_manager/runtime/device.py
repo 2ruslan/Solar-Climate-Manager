@@ -105,7 +105,9 @@ class DeviceRuntime:
         )
         self.demand = decision.demand
         if sources.running is not None:
-            self.observed = self.observed.observe(sources.running, now.timestamp())
+            self.observed = self.observed.observe(
+                sources.running, now.timestamp(), sources.climate_changed_at,
+            )
         evaluation = decide(
             sources.energy, self.observed, self.policy,
             EnergyPolicyConfig.from_settings(settings if settings is not None else self.settings),

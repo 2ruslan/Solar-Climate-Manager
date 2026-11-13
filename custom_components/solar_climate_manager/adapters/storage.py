@@ -117,11 +117,15 @@ def restore_runtime(
         observed, policy = restore(saved.get("control"), now)
     elif isinstance(previous_control := saved.get("control"), dict):
         policy.soc_blocked = previous_control.get("soc_blocked") is True
-        observed = ObservedDeviceState(
-            last_stop=(
-                now
-                if previous_control.get("running") is True
-                else valid_timestamp(previous_control.get("last_stop"), now)
+        if isinstance(signature, dict) and signature.get("climate_entity") == settings.get("climate_entity"):
+            # A settings edit does not stop the physical device or restart its pause.
+            observed, _ = restore(previous_control, now)
+        else:
+            observed = ObservedDeviceState(
+                last_stop=(
+                    now
+                    if previous_control.get("running") is True
+                    else valid_timestamp(previous_control.get("last_stop"), now)
+                )
             )
-        )
     return RestoredState(demand, observed, policy, manual_date, previous_mode)

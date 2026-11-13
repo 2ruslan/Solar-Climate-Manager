@@ -148,6 +148,21 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.coordinator.data["control_allowed"])
         self.assertEqual(self.states["climate.ac"].state, "off")
 
+    async def test_delayed_off_observation_uses_transition_time(self):
+        self.put("climate.ac", "heat", hvac_modes=["heat", "off"], temperature=23)
+        self.coordinator._evaluate()
+        clock.current += timedelta(seconds=60)
+        stopped = clock.current
+        self.put("climate.ac", "off", hvac_modes=["heat", "off"], temperature=23)
+        self.states["climate.ac"].last_changed = stopped
+        clock.current += timedelta(seconds=420)
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.runtime.observed.last_stop, stopped.timestamp())
+        self.assertEqual(self.coordinator.data["seconds_to_start"], 180)
+        clock.current += timedelta(seconds=180)
+        self.coordinator._evaluate()
+        self.assertEqual(self.coordinator.data["strategy_action"], "start")
+
     async def test_manual_change_survives_reload_and_expires_locally(self):
         old = self.states["climate.ac"]
         self.put("climate.ac", "heat", hvac_modes=["heat", "cool", "off"], temperature=24)

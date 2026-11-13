@@ -98,6 +98,13 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             snapshot.readings["pv_power_entity"] = None
 
+    def test_climate_transition_time_is_separate_from_latest_report(self):
+        stopped = self.now - timedelta(hours=1)
+        self.states["climate.ac"].last_changed = stopped
+        self.assertEqual(self.capture().climate_changed_at, stopped.timestamp())
+        self.states["climate.ac"].state = "unavailable"
+        self.assertIsNone(self.capture().climate_changed_at)
+
     def test_measurement_values_are_validated_without_report_age(self):
         cases = [
             ("missing", None, None, None),
@@ -279,8 +286,23 @@ class StorageTests(unittest.TestCase):
         restored = storage.restore_runtime(self.saved, settings=changed, options={}, now=200)
         self.assertFalse(restored.demand)
         self.assertTrue(restored.policy.soc_blocked)
+        self.assertEqual(restored.observed, models.ObservedDeviceState(True, 100, 50))
+
+    def test_changed_climate_does_not_inherit_running_cycle(self):
+        changed = {**self.settings, "climate_entity": "climate.other"}
+        restored = storage.restore_runtime(self.saved, settings=changed, options={}, now=200)
         self.assertFalse(restored.observed.running)
         self.assertEqual(restored.observed.last_stop, 200)
+
+    def test_settings_reload_preserves_elapsed_off_time(self):
+        self.saved["control"].update(running=False, last_stop=150)
+        for key, value in (("target_temperature", 24), ("operation_mode", "control"),
+                           ("minimum_off_time", 900)):
+            with self.subTest(setting=key):
+                restored = storage.restore_runtime(
+                    self.saved, settings={**self.settings, key: value}, options={}, now=4000,
+                )
+                self.assertEqual(restored.observed.last_stop, 150)
 
     def test_pre_learning_settings_preserve_cycle_deadlines(self):
         for key in ("power_learning_enabled", "power_learning_generation"):
@@ -303,7 +325,7 @@ class StorageTests(unittest.TestCase):
         self.assertNotIn("power_accounting", self.saved["policy_signature"])
         changed = storage.restore_runtime(self.saved,
             settings={**self.settings, "power_accounting": "estimated"}, options={}, now=200)
-        self.assertEqual(changed.observed.last_stop, 200)
+        self.assertEqual(changed.observed, models.ObservedDeviceState(True, 100, 50))
 
     def test_temporary_block_options_take_precedence_and_missing_mode_is_conservative(self):
         blocked = {**self.settings, "operation_mode": "temporary_block"}

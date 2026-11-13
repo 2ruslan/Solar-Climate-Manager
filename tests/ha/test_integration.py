@@ -143,6 +143,48 @@ async def test_reload_restores_hysteresis_and_options_reset(hass):
     assert not entry.runtime_data.data["demand"]
 
 
+@pytest.mark.parametrize("elapsed", [420, 600, 3600])
+async def test_reload_counts_off_time_before_conditions_recover(hass, freezer, elapsed):
+    entry = await setup(hass, energy_ready=True)
+    attributes = dict(hass.states.get("climate.test").attributes)
+    hass.states.async_set("climate.test", "heat", attributes)
+    await hass.async_block_till_done()
+    await entry.runtime_data.async_set_mode("observation")
+    assert entry.runtime_data.runtime.observed.running
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    freezer.tick(timedelta(seconds=60))
+    stopped = dt_util.utcnow()
+    hass.states.async_set("climate.test", "off", attributes)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=elapsed))
+    # New attribute reports must not restart the physical off interval.
+    hass.states.async_set("climate.test", "off", {**attributes, "current_temperature": 20})
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "target_temperature": 25},
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data
+    assert coordinator.runtime.observed.last_stop == stopped.timestamp()
+    assert coordinator.data["strategy_action"] == ("wait" if elapsed < 600 else "start")
+    assert coordinator.data["seconds_to_start"] == (600 - elapsed if elapsed < 600 else None)
+
+    # Group capture can run before the member consumes the same report.
+    from custom_components.solar_climate_manager.domain.types import ObservedDeviceState
+
+    coordinator.runtime.observed = ObservedDeviceState(True, stopped.timestamp() - 60)
+    manager = coordinator.group_manager
+    registry = manager.repository.registry
+    _, group = coordinator._membership()
+    snapshot = manager._capture(group, registry)
+    request = next(r for r in snapshot.requests if r.device_id == coordinator.device_id)
+    assert request.last_stop == stopped.timestamp()
+    assert request.last_start == stopped.timestamp() - 60
+    assert coordinator.runtime.observed.running  # Capture remains read-only.
+
+
 async def test_unchanged_temperature_does_not_expire(hass):
     entry = await setup(hass)
     with patch(
